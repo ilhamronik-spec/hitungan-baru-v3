@@ -5,11 +5,11 @@
   xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
   xsi:type="TaskPaneApp">
   <Id>dc957459-31a7-45ca-bbfa-f5ca8d09db43</Id>
-  <Version>3.0.0.0</Version>
+  <Version>3.1.1.0</Version>
   <ProviderName>SDM Smart</ProviderName>
   <DefaultLocale>id-ID</DefaultLocale>
   <DisplayName DefaultValue="Pengaman Hitungan V3" />
-  <Description DefaultValue="Mengunci sheet lama penuh dan mengunci area non-input pada sheet terbaru secara otomatis." />
+  <Description DefaultValue="Fail-closed: sheet lama terkunci penuh, sheet terbaru hanya area input, karyawan dapat membuat hari baru tanpa PIN." />
   <IconUrl DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/assets/icon-32.png" />
   <HighResolutionIconUrl DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/assets/icon-80.png" />
   <SupportUrl DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/support.html" />
@@ -26,7 +26,7 @@
     </Sets>
   </Requirements>
   <DefaultSettings>
-    <SourceLocation DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/taskpane.html" />
+    <SourceLocation DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/taskpane.html?v=3.1.1" />
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
 
@@ -84,15 +84,15 @@
         <bt:Image id="Icon.80" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/assets/icon-80.png" />
       </bt:Images>
       <bt:Urls>
-        <bt:Url id="Taskpane.Url" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/taskpane.html" />
+        <bt:Url id="Taskpane.Url" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/taskpane.html?v=3.1.1" />
       </bt:Urls>
       <bt:ShortStrings>
         <bt:String id="Group.Label" DefaultValue="Pengaman Hitungan V3" />
         <bt:String id="Button.Label" DefaultValue="PENGAMAN V3" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="Addin.Description" DefaultValue="Pengaman otomatis untuk workbook hitungan konter." />
-        <bt:String id="Button.Description" DefaultValue="Buka panel pengaman, atur PIN admin, dan aktifkan perlindungan otomatis." />
+        <bt:String id="Addin.Description" DefaultValue="Pengaman fail-closed untuk workbook hitungan konter." />
+        <bt:String id="Button.Description" DefaultValue="Buka panel pengaman dan kontrol pembuatan hari baru." />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>
