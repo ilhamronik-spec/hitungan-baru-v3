@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Hitungan Baru Aman V4</title>
+    <link rel="stylesheet" href="./taskpane.css" />
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <script src="./taskpane.js" defer></script>
+  </head>
+  <body>
+    <main class="pane">
+      <header class="header">
+        <div class="mark" aria-hidden="true">HB</div>
+        <div>
+          <h1>Hitungan Baru Aman V4</h1>
+          <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
+        </div>
+      </header>
+
+      <section class="security-card">
+        <div class="security-title">Pengaman Workbook</div>
+        <div id="securityStatus" class="security-status">Memeriksa proteksi...</div>
+      </section>
+
+      <section id="securitySetup" class="security-card" hidden>
+        <h2>Aktivasi pertama</h2>
+        <p class="security-note">Buat PIN admin. Setelah aktif, fungsi Harian/Ada Belanja dan proteksi berjalan dalam satu proses.</p>
+        <label for="setupPin">PIN admin baru (minimal 8 karakter)</label>
+        <input id="setupPin" type="password" autocomplete="new-password" />
+        <label for="setupPin2">Ulangi PIN admin</label>
+        <input id="setupPin2" type="password" autocomplete="new-password" />
+        <label for="oldPassword">Password proteksi lama (opsional)</label>
+        <input id="oldPassword" type="password" autocomplete="off" placeholder="Kosongkan bila V3 lama masih tersimpan" />
+        <button id="setupSecurityBtn" type="button">AKTIFKAN HITUNGAN AMAN V4</button>
+      </section>
+
+      <details id="adminSecurity" class="security-card" hidden>
+        <summary>Admin / Koreksi</summary>
+        <label for="adminPin">PIN admin</label>
+        <input id="adminPin" type="password" autocomplete="off" />
+        <div class="admin-grid">
+          <button id="adminUnlockSheetBtn" type="button" class="secondary-button">Buka Sheet Aktif</button>
+          <button id="adminWorkingLockBtn" type="button" class="secondary-button">Kunci sebagai Sheet Kerja</button>
+          <button id="adminFullLockBtn" type="button" class="secondary-button">Full Lock Sheet Aktif</button>
+          <button id="adminUnlockStructureBtn" type="button" class="secondary-button">Buka Struktur 2 Menit</button>
+          <button id="adminLockStructureBtn" type="button" class="secondary-button">Kunci Struktur Sekarang</button>
+          <button id="adminSyncBtn" type="button" class="secondary-button">Sinkron Semua Sheet</button>
+        </div>
+      </details>
+
+      <form id="newDayForm" novalidate>
+        <fieldset class="mode-fieldset">
+          <legend>Jenis sheet</legend>
+          <div class="segmented" role="radiogroup" aria-label="Jenis sheet">
+            <input id="modeDaily" type="radio" name="mode" value="daily" checked />
+            <label for="modeDaily">Harian</label>
+            <input id="modeShopping" type="radio" name="mode" value="shopping" />
+            <label for="modeShopping">Ada Belanja</label>
+          </div>
+        </fieldset>
+
+        <label for="person">Penanggung jawab</label>
+        <select id="person" name="person" required>
+          <option value="">Pilih nama</option>
+          <option value="ftry">ftry</option>
+          <option value="sfa">sfa</option>
+          <option value="rfda">rfda</option>
+          <option value="rfda&amp;sfa">rfda&amp;sfa</option>
+          <option value="ftry&amp;sfa">ftry&amp;sfa</option>
+          <option value="ftry&amp;rfda">ftry&amp;rfda</option>
+          <option value="full">full</option>
+        </select>
+
+        <label for="sheetName">Nama sheet baru</label>
+        <input
+          id="sheetName"
+          name="sheetName"
+          type="text"
+          maxlength="31"
+          autocomplete="off"
+          placeholder="Contoh: 3 agustus malam"
+          required
+        />
+
+        <section id="shoppingSection" class="shopping-section" hidden>
+          <div class="shopping-heading">
+            <h2>Input belanja</h2>
+            <button id="reloadProducts" class="icon-button" type="button" title="Muat ulang daftar barang" aria-label="Muat ulang daftar barang">&#8635;</button>
+          </div>
+
+          <div class="tabs" role="tablist" aria-label="Jenis barang">
+            <button id="packageTab" class="tab active" type="button" role="tab" aria-selected="true" data-tab="package">Paket</button>
+            <button id="cigaretteTab" class="tab" type="button" role="tab" aria-selected="false" data-tab="cigarette">Rokok</button>
+          </div>
+
+          <label class="sr-only" for="productSearch">Cari barang</label>
+          <input id="productSearch" type="search" autocomplete="off" placeholder="Cari nama barang" />
+
+          <div id="productSummary" class="product-summary"></div>
+          <div id="productList" class="product-list" aria-live="polite"></div>
+        </section>
+
+        <button id="repairStorageFormulas" class="secondary-button" type="button">
+          <span class="button-icon" aria-hidden="true">&#8635;</span>
+          <span>Pulihkan Rumus N</span>
+        </button>
+
+        <button id="createButton" type="submit">
+          <span class="button-icon" aria-hidden="true">+</span>
+          <span>Buat Sheet Baru</span>
+        </button>
+      </form>
+
+      <div id="status" class="status" role="status" aria-live="polite"></div>
+    </main>
+  </body>
+</html>
