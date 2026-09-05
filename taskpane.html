@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pengaman Hitungan V3</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <link rel="stylesheet" href="taskpane.css" />
+</head>
+<body>
+  <main class="wrap">
+    <h1>Pengaman Hitungan V3</h1>
+    <p class="sub">
+      Dipakai bersama add-in <b>BUAT HARI BARU V2</b>. V3 memantau saat sheet baru dibuat.
+    </p>
+
+    <section class="card" id="statusCard">
+      <div class="status-row">
+        <span id="statusDot" class="dot off"></span>
+        <div>
+          <div class="label">Status</div>
+          <div id="statusText">Memeriksa workbook…</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="setupCard">
+      <h2>Pengaturan pertama</h2>
+      <p>
+        Buat PIN admin. PIN ini hanya untuk membuka atau mengubah proteksi.
+        Sistem membuat password sheet internal secara otomatis.
+      </p>
+      <label>PIN admin baru (minimal 8 karakter)</label>
+      <input id="setupPin" type="password" autocomplete="new-password" />
+      <label>Ulangi PIN admin</label>
+      <input id="setupPin2" type="password" autocomplete="new-password" />
+      <label>Password proteksi lama (opsional)</label>
+      <input id="oldPassword" type="password" autocomplete="off"
+        placeholder="Isi jika sheet sekarang sudah diproteksi macro lama" />
+      <button id="setupBtn" class="primary">AKTIFKAN PENGAMAN V3</button>
+      <p class="hint">
+        Saat diaktifkan: sheet aktif menjadi sheet kerja (hanya area input yang bisa diedit),
+        sedangkan semua sheet lain dikunci penuh.
+      </p>
+    </section>
+
+    <section class="card" id="adminCard">
+      <h2>Admin</h2>
+      <label>PIN admin</label>
+      <input id="adminPin" type="password" autocomplete="off" />
+
+      <div class="grid">
+        <button id="unlockBtn">BUKA SHEET AKTIF</button>
+        <button id="partialLockBtn">KUNCI SEBAGAI SHEET KERJA</button>
+        <button id="fullLockBtn">KUNCI PENUH SHEET AKTIF</button>
+        <button id="syncBtn">SINKRONKAN SEMUA SHEET</button>
+      </div>
+
+      <button id="hideBtn" class="ghost">SEMBUNYIKAN PANEL (PENGAMAN TETAP BERJALAN)</button>
+    </section>
+
+    <section class="card">
+      <h2>Alur harian</h2>
+      <ol>
+        <li>Gunakan <b>BUAT HARI BARU V2</b> seperti biasa.</li>
+        <li>V3 mendeteksi sheet baru.</li>
+        <li>V3 menunggu perubahan selesai beberapa detik.</li>
+        <li>Sheet lama dikunci 100%.</li>
+        <li>Sheet baru hanya membuka area input; area non-input tetap terkunci.</li>
+      </ol>
+    </section>
+
+    <div id="message" class="message"></div>
+  </main>
+  <script src="taskpane.js"></script>
+</body>
+</html>
