@@ -1,0 +1,62 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: "Segoe UI", Arial, sans-serif;
+  background: #f6f7f9;
+  color: #1f2937;
+}
+.wrap { padding: 16px; max-width: 680px; margin: 0 auto; }
+h1 { font-size: 22px; margin: 0 0 6px; }
+h2 { font-size: 16px; margin: 0 0 10px; }
+.sub { margin: 0 0 14px; color: #4b5563; line-height: 1.45; }
+.card {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px;
+  margin: 0 0 12px;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04);
+}
+label { display: block; font-size: 12px; font-weight: 600; margin: 10px 0 5px; }
+input {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  padding: 9px 10px;
+  font-size: 14px;
+}
+button {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 650;
+  cursor: pointer;
+  margin-top: 8px;
+}
+button:hover { background: #f8fafc; }
+button.primary {
+  background: #166534;
+  color: white;
+  border-color: #166534;
+}
+button.ghost { background: #f8fafc; }
+.grid { display: grid; grid-template-columns: 1fr; gap: 4px; margin-top: 8px; }
+.status-row { display: flex; gap: 10px; align-items: center; }
+.dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+.dot.on { background: #16a34a; }
+.dot.off { background: #9ca3af; }
+.dot.wait { background: #d97706; }
+.label { font-size: 11px; color: #6b7280; text-transform: uppercase; font-weight: 700; }
+#statusText { font-size: 14px; font-weight: 600; margin-top: 2px; }
+.hint { font-size: 12px; color: #6b7280; line-height: 1.45; }
+.message {
+  min-height: 18px;
+  padding: 4px 2px 14px;
+  font-size: 12px;
+  color: #374151;
+  white-space: pre-wrap;
+}
+ol { margin: 8px 0 0 20px; padding: 0; line-height: 1.5; font-size: 13px; }
+.hidden { display: none !important; }
