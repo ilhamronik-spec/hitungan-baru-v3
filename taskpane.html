@@ -11,11 +11,9 @@
 <body>
   <main class="wrap">
     <h1>Pengaman Hitungan V3</h1>
-    <p class="sub">
-      Dipakai bersama add-in <b>BUAT HARI BARU V2</b>. V3 memantau saat sheet baru dibuat.
-    </p>
+    <p class="sub">Mode <b>fail-closed</b>: kalau V3 hilang, proteksi workbook tetap menempel di file.</p>
 
-    <section class="card" id="statusCard">
+    <section class="card">
       <div class="status-row">
         <span id="statusDot" class="dot off"></span>
         <div>
@@ -27,22 +25,15 @@
 
     <section class="card" id="setupCard">
       <h2>Pengaturan pertama</h2>
-      <p>
-        Buat PIN admin. PIN ini hanya untuk membuka atau mengubah proteksi.
-        Sistem membuat password sheet internal secara otomatis.
-      </p>
       <label>PIN admin baru (minimal 8 karakter)</label>
       <input id="setupPin" type="password" autocomplete="new-password" />
       <label>Ulangi PIN admin</label>
       <input id="setupPin2" type="password" autocomplete="new-password" />
       <label>Password proteksi lama (opsional)</label>
       <input id="oldPassword" type="password" autocomplete="off"
-        placeholder="Isi jika sheet sekarang sudah diproteksi macro lama" />
-      <button id="setupBtn" class="primary">AKTIFKAN PENGAMAN V3</button>
-      <p class="hint">
-        Saat diaktifkan: sheet aktif menjadi sheet kerja (hanya area input yang bisa diedit),
-        sedangkan semua sheet lain dikunci penuh.
-      </p>
+        placeholder="Isi jika sheet/workbook sudah diproteksi sebelumnya" />
+      <button id="setupBtn" class="primary">AKTIFKAN PENGAMAN FAIL-CLOSED</button>
+      <p class="hint">Sheet aktif menjadi sheet kerja. Sheet lain full lock. Struktur workbook juga dikunci.</p>
     </section>
 
     <section class="card" id="adminCard">
@@ -50,24 +41,31 @@
       <label>PIN admin</label>
       <input id="adminPin" type="password" autocomplete="off" />
 
+      <button id="beginDayBtn" class="primary">IZINKAN BUAT HARI BARU (90 DETIK)</button>
+      <p class="hint">
+        Klik ini dulu, lalu jalankan <b>BUAT HARI BARU V2</b>. V3 membuka proteksi sementara,
+        lalu mengunci kembali otomatis setelah sheet baru selesai dibuat.
+      </p>
+
       <div class="grid">
         <button id="unlockBtn">BUKA SHEET AKTIF</button>
         <button id="partialLockBtn">KUNCI SEBAGAI SHEET KERJA</button>
         <button id="fullLockBtn">KUNCI PENUH SHEET AKTIF</button>
-        <button id="syncBtn">SINKRONKAN SEMUA SHEET</button>
+        <button id="syncBtn">SINKRONKAN + KUNCI STRUKTUR</button>
+        <button id="lockNowBtn">KUNCI STRUKTUR SEKARANG</button>
       </div>
 
-      <button id="hideBtn" class="ghost">SEMBUNYIKAN PANEL (PENGAMAN TETAP BERJALAN)</button>
+      <button id="hideBtn" class="ghost">SEMBUNYIKAN PANEL</button>
     </section>
 
     <section class="card">
       <h2>Alur harian</h2>
       <ol>
-        <li>Gunakan <b>BUAT HARI BARU V2</b> seperti biasa.</li>
-        <li>V3 mendeteksi sheet baru.</li>
-        <li>V3 menunggu perubahan selesai beberapa detik.</li>
-        <li>Sheet lama dikunci 100%.</li>
-        <li>Sheet baru hanya membuka area input; area non-input tetap terkunci.</li>
+        <li>Masukkan PIN admin.</li>
+        <li>Klik <b>IZINKAN BUAT HARI BARU</b>.</li>
+        <li>Dalam 90 detik jalankan <b>BUAT HARI BARU V2</b>.</li>
+        <li>V3 mendeteksi sheet baru dan menunggu V2 selesai.</li>
+        <li>Sheet lama full lock, sheet baru partial lock, struktur workbook terkunci lagi.</li>
       </ol>
     </section>
 
