@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pemulihan Pengaman V3</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#f6f7f9;color:#1f2937}
+    .wrap{padding:18px}.card{background:white;border:1px solid #dfe3e8;border-radius:12px;padding:16px}
+    h1{font-size:20px;margin:0 0 8px}.muted{font-size:13px;color:#667085;line-height:1.5}
+    label{display:block;font-size:13px;font-weight:600;margin:16px 0 6px}
+    input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px}
+    button{width:100%;margin-top:12px;padding:11px;border:0;border-radius:8px;background:#0f6cbd;color:white;font-weight:700;cursor:pointer}
+    button:disabled{opacity:.55;cursor:not-allowed}.status{margin-top:14px;padding:10px;border-radius:8px;background:#eef4ff;font-size:13px;white-space:pre-wrap}
+    .warn{margin-top:12px;padding:10px;border-radius:8px;background:#fff4e5;font-size:12px;line-height:1.45}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Pemulihan Pengaman V3</h1>
+    <div class="muted">Khusus untuk workbook asli. Alat ini tidak mengubah data, formula, nama sheet, atau link OneDrive. Fungsinya hanya membuka proteksi V3 dan mematikan auto-protection agar metadata add-in lama bisa dibersihkan.</div>
+    <label>PIN admin V3</label>
+    <input id="pin" type="password" autocomplete="off" placeholder="Masukkan PIN admin yang dulu dibuat" />
+    <button id="unlock">BUKA SEMUA PROTEKSI + MATIKAN V3</button>
+    <div class="warn">Setelah berhasil, jangan edit data. Langsung buka File → Info → Check for Issues → Inspect Document, lalu hapus hanya bagian <b>Task Pane Add-ins</b>.</div>
+    <div id="status" class="status">Menunggu Excel…</div>
+  </div>
+</div>
+<script src="taskpane.js?v=1"></script>
+</body>
+</html>
