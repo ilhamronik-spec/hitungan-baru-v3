@@ -8,6 +8,7 @@
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <script src="./taskpane.js" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
+    <script src="./display-transfer.js?v=1" defer></script>
   </head>
   <body>
     <main class="pane">
@@ -83,6 +84,24 @@
           placeholder="Contoh: 3 agustus malam"
           required
         />
+
+        <section id="displayTransferSection" class="shopping-section">
+          <div class="shopping-heading">
+            <div>
+              <h2>Tambah stok display rokok</h2>
+              <p class="security-note">Gudang → display. Bukan belanja.</p>
+            </div>
+            <button id="displayTransferToggle" class="secondary-button" type="button" style="margin:0; min-height:34px; padding:6px 10px;">Buka</button>
+          </div>
+
+          <div id="displayTransferBody" hidden>
+            <p id="displayTransferMessage" class="security-note"></p>
+            <label class="sr-only" for="displayTransferSearch">Cari rokok</label>
+            <input id="displayTransferSearch" type="search" autocomplete="off" placeholder="Cari nama rokok" />
+            <div id="displayTransferSummary" class="product-summary"></div>
+            <div id="displayTransferList" class="product-list" aria-live="polite"></div>
+          </div>
+        </section>
 
         <section id="shoppingSection" class="shopping-section" hidden>
           <div class="shopping-heading">
