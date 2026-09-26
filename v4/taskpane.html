@@ -6,12 +6,12 @@
     <title>Hitungan Baru Aman V4</title>
     <link rel="stylesheet" href="./taskpane.css" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./taskpane.js" defer></script>
+    <script src="./taskpane.js?v=4.3.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
-    <script src="./display-transfer.js?v=1" defer></script>
-    <script src="./auto-lock.js?v=3" defer></script>
-    <script src="./orphan-lock.js?v=2" defer></script>
-    <script src="./shift-lock-fix.js?v=1" defer></script>
+    <script src="./display-transfer.js?v=2" defer></script>
+    <script src="./auto-lock.js?v=4" defer></script>
+    <script src="./orphan-lock.js?v=3" defer></script>
+    <script src="./shift-lock-fix.js?v=2" defer></script>
   </head>
   <body>
     <main class="pane">
@@ -44,6 +44,11 @@
         <summary>Admin / Koreksi</summary>
         <label for="adminPin">PIN admin</label>
         <input id="adminPin" type="password" autocomplete="off" />
+        <div class="admin-global-actions">
+          <button id="adminUnlockAllSheetsBtn" type="button" class="secondary-button admin-unlock-all">BUKA SEMUA SHEET</button>
+          <button id="adminLockAllSheetsBtn" type="button" class="secondary-button admin-lock-all">KUNCI SEMUA KEMBALI</button>
+          <p id="globalUnlockHint" class="security-note">Mode ini membutuhkan PIN admin. Jika dibuka, semua sheet tetap terbuka tanpa batas waktu sampai dikunci kembali oleh admin.</p>
+        </div>
         <div class="admin-grid">
           <button id="adminUnlockSheetBtn" type="button" class="secondary-button">Buka Sheet Aktif</button>
           <button id="adminWorkingLockBtn" type="button" class="secondary-button">Kunci sebagai Sheet Kerja</button>
