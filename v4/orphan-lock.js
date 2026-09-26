@@ -22,6 +22,10 @@ async function lockOrphanUnprotectedSheets() {
   const enabled = enabledRaw === true || String(enabledRaw).toLowerCase() === "true";
   if (!enabled) return;
 
+  const globalUnlockRaw = getSetting("hitunganV4.globalUnlockAll");
+  const globalUnlock = globalUnlockRaw === true || String(globalUnlockRaw).toLowerCase() === "true";
+  if (globalUnlock) return;
+
   const now = Date.now();
   const shiftId = getSetting(ORPHAN_SHIFT_ID_KEY);
   const shiftUntil = Number(getSetting(ORPHAN_SHIFT_UNTIL_KEY));
