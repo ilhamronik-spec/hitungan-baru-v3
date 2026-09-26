@@ -75,7 +75,8 @@ async function setupSecurityFixed() {
     setSetting(CFG.pinHash, await sha256(p1));
     setSetting(CFG.secret, newPw);
     setSetting(CFG.enabled, true);
-    setSetting(CFG.version, "4.0.2-migration-fix");
+    setSetting(CFG.globalUnlock, false);
+    setSetting(CFG.version, "4.3.0");
     await saveSettings();
 
     secret = newPw;
