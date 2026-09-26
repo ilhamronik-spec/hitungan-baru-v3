@@ -23,6 +23,13 @@ let shiftCreateWrapped = false;
 let shiftWrapTimer = null;
 let shiftUiTimer = null;
 
+function persistentAdminUnlockActive() {
+  if (typeof isGlobalUnlockMode === "function") return isGlobalUnlockMode();
+  if (typeof getSetting !== "function") return false;
+  const value = getSetting("hitunganV4.globalUnlockAll");
+  return value === true || String(value).toLowerCase() === "true";
+}
+
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
 
@@ -177,6 +184,7 @@ function scheduleShiftWorkRelock(until) {
 }
 
 async function expireShiftWorkWindow() {
+  if (persistentAdminUnlockActive()) return;
   const sheetId = getSetting(SHIFT_SHEET_ID_KEY);
   const sheetName = getSetting(SHIFT_SHEET_NAME_KEY) || "sheet";
   const until = Number(getSetting(SHIFT_UNTIL_KEY));
@@ -218,6 +226,7 @@ async function expireShiftWorkWindow() {
 
 async function employeeCloseShiftNow() {
   try {
+    if (persistentAdminUnlockActive()) throw new Error("Mode ADMIN BEBAS sedang aktif. Sheet hanya dapat dikunci kembali melalui tombol KUNCI SEMUA KEMBALI.");
     const sheetId = getSetting(SHIFT_SHEET_ID_KEY);
     const sheetName = getSetting(SHIFT_SHEET_NAME_KEY) || "sheet";
     if (!sheetId) throw new Error("Tidak ada sheet kerja aktif yang bisa ditutup.");
@@ -268,6 +277,12 @@ async function refreshShiftUi() {
   const sheetId = getSetting(SHIFT_SHEET_ID_KEY);
   const sheetName = getSetting(SHIFT_SHEET_NAME_KEY) || "";
   const until = Number(getSetting(SHIFT_UNTIL_KEY));
+
+  if (persistentAdminUnlockActive()) {
+    el.textContent = "ADMIN BEBAS aktif — semua sheet tetap terbuka sampai admin mengunci kembali.";
+    btn.disabled = true;
+    return;
+  }
 
   if (!sheetId || !Number.isFinite(until)) {
     el.textContent = "Tidak ada shift dalam masa pengisian 2,5 jam.";
@@ -324,6 +339,7 @@ async function clearShiftWindowIfItsSheetIsFullLocked() {
 
 async function captureAdminUnlockedSheet() {
   try {
+    if (persistentAdminUnlockActive()) return;
     const info = await Excel.run(async (context) => {
       const sh = context.workbook.worksheets.getActiveWorksheet();
       sh.load("id,name,protection/protected");
@@ -346,6 +362,10 @@ async function captureAdminUnlockedSheet() {
 }
 
 async function restoreAdminSheetAutoLock() {
+  if (persistentAdminUnlockActive()) {
+    await clearAdminSheetAutoLockState();
+    return;
+  }
   const sheetId = getSetting(ADMIN_UNLOCK_SHEET_ID_KEY);
   const untilRaw = getSetting(ADMIN_UNLOCK_UNTIL_KEY);
   if (!sheetId || !untilRaw) return;
@@ -369,6 +389,7 @@ function scheduleAdminSheetRelock(until) {
 }
 
 async function relockPendingAdminSheet() {
+  if (persistentAdminUnlockActive()) return;
   const sheetId = getSetting(ADMIN_UNLOCK_SHEET_ID_KEY);
   const sheetName = getSetting(ADMIN_UNLOCK_SHEET_NAME_KEY) || "sheet";
   if (!sheetId) return;
