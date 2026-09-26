@@ -349,3 +349,39 @@ button:disabled {
 .admin-grid { display:grid; gap:6px; margin-top:8px; }
 .admin-grid button { margin-top:4px; }
 .security-disabled { opacity:.55; pointer-events:none; }
+
+
+.admin-global-actions {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #d6a756;
+  border-radius: 6px;
+  background: #fff9ed;
+}
+
+.admin-global-actions button {
+  margin-top: 2px;
+}
+
+.admin-unlock-all {
+  border-color: #b45309;
+  color: #92400e;
+}
+
+.admin-unlock-all:hover {
+  background: #fff3d6;
+}
+
+.admin-lock-all {
+  border-color: #107c41;
+  color: #0b6735;
+}
+
+.admin-global-actions button:disabled {
+  border-color: #9ca3af;
+  background: #f3f4f6;
+  color: #6b7280;
+  cursor: not-allowed;
+}
