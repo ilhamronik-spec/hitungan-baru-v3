@@ -5,7 +5,7 @@
   xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
   xsi:type="TaskPaneApp">
   <Id>9498cf4b-dd6c-4e26-a66b-a142b61db998</Id>
-  <Version>4.2.0.0</Version>
+  <Version>4.3.0.0</Version>
   <ProviderName>SDM Smart</ProviderName>
   <DefaultLocale>id-ID</DefaultLocale>
   <DisplayName DefaultValue="Hitungan Baru Aman V4" />
@@ -16,7 +16,7 @@
   <AppDomains><AppDomain>https://ilhamronik-spec.github.io/hitungan-baru-v3</AppDomain></AppDomains>
   <Hosts><Host Name="Workbook" /></Hosts>
   <Requirements><Sets DefaultMinVersion="1.7"><Set Name="ExcelApi" MinVersion="1.7" /></Sets></Requirements>
-  <DefaultSettings><SourceLocation DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/v4/taskpane.html?v=4.2.0" /></DefaultSettings>
+  <DefaultSettings><SourceLocation DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/v4/taskpane.html?v=4.3.0" /></DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
   <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
     <Description resid="Addin.Description" />
@@ -36,7 +36,7 @@
       <bt:Image id="Icon.80" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/assets/icon-80.png" />
     </bt:Images><bt:Urls>
       <bt:Url id="Commands.Url" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/v4/commands.html" />
-      <bt:Url id="Taskpane.Url" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/v4/taskpane.html?v=4.2.0" />
+      <bt:Url id="Taskpane.Url" DefaultValue="https://ilhamronik-spec.github.io/hitungan-baru-v3/v4/taskpane.html?v=4.3.0" />
     </bt:Urls><bt:ShortStrings>
       <bt:String id="Group.Label" DefaultValue="Sheet Harian Aman" />
       <bt:String id="Button.Label" DefaultValue="BUAT HARI BARU AMAN" />
