@@ -295,7 +295,9 @@ async function applyDisplayTransfersToNewSheet(sheetName, transfers) {
     });
 
     sheet.calculate(true);
-    workingLock(sheet, pw);
+    if (typeof isGlobalUnlockMode !== "function" || !isGlobalUnlockMode()) {
+      workingLock(sheet, pw);
+    }
     await context.sync();
   });
 }
