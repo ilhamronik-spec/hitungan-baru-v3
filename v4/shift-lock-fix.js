@@ -37,6 +37,14 @@ async function refreshFallbackShiftButton() {
   const status = document.getElementById("shiftWindowStatus");
   if (!btn || !status || typeof getSetting !== "function") return;
 
+  const globalUnlockRaw = getSetting("hitunganV4.globalUnlockAll");
+  const globalUnlock = globalUnlockRaw === true || String(globalUnlockRaw).toLowerCase() === "true";
+  if (globalUnlock) {
+    btn.disabled = true;
+    status.textContent = "ADMIN BEBAS aktif — semua sheet tetap terbuka sampai admin mengunci kembali.";
+    return;
+  }
+
   const shiftId = getSetting("hitunganV4.shiftWorkSheetId");
   const shiftUntil = Number(getSetting("hitunganV4.shiftWorkUntil"));
   if (shiftId && Number.isFinite(shiftUntil) && Date.now() < shiftUntil) return;
@@ -58,6 +66,9 @@ async function refreshFallbackShiftButton() {
 
 async function employeeFallbackCloseLatestSheet() {
   try {
+    const globalUnlockRaw = typeof getSetting === "function" ? getSetting("hitunganV4.globalUnlockAll") : false;
+    const globalUnlock = globalUnlockRaw === true || String(globalUnlockRaw).toLowerCase() === "true";
+    if (globalUnlock) throw new Error("Mode ADMIN BEBAS sedang aktif. Gunakan KUNCI SEMUA KEMBALI untuk mengakhiri mode ini.");
     if (typeof requireSecret !== "function" || typeof fullLock !== "function") {
       throw new Error("Mesin pengaman V4 belum siap.");
     }
