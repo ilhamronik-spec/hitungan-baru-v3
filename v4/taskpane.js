@@ -1,7 +1,7 @@
 "use strict";
 
 const V2_SCRIPT = "https://hitungan-baru-excel-ilham.bienbachthuatz2.chatgpt.site/taskpane.js";
-const CFG = { enabled:"hitunganV4.enabled", pinHash:"hitunganV4.pinHash", secret:"hitunganV4.secret", version:"hitunganV4.version" };
+const CFG = { enabled:"hitunganV4.enabled", pinHash:"hitunganV4.pinHash", secret:"hitunganV4.secret", version:"hitunganV4.version", globalUnlock:"hitunganV4.globalUnlockAll" };
 const LEGACY_V3_SECRET_KEY = "hitunganV3.secret";
 const WORK_AREA = "A1:AH400";
 const LOCK_RANGES = [
@@ -45,11 +45,21 @@ function installWrappers(){
         await c.sync();
         if(newest.protection.protected) newest.protection.unprotect(pw);
         if(old.protection.protected) old.protection.unprotect(pw);
-        fullLock(old,pw); workingLock(newest,pw);
-        if(!wb.protection.protected) wb.protection.protect(pw);
+        if(isGlobalUnlockMode()){
+          // Mode admin persisten: sheet lama dan baru harus tetap terbuka.
+          if(!wb.protection.protected) wb.protection.protect(pw);
+        }else{
+          fullLock(old,pw); workingLock(newest,pw);
+          if(!wb.protection.protected) wb.protection.protect(pw);
+        }
         await c.sync();
       });
-      setSecurityStatus("AMAN — hari baru selesai, sheet lama full lock, struktur terkunci.",false);
+      setSecurityStatus(
+        isGlobalUnlockMode()
+          ? "ADMIN BEBAS — hari baru selesai dan semua sheet tetap terbuka sampai dikunci kembali."
+          : "AMAN — hari baru selesai, sheet lama full lock, struktur terkunci.",
+        false
+      );
       return result;
     }catch(err){
       await failClosedRecovery(sourceName,sheetName,pw);
@@ -63,7 +73,7 @@ function installWrappers(){
       const pw=requireSecret();
       await Excel.run(async c=>{ const sh=c.workbook.worksheets.getActiveWorksheet(); sh.load("protection/protected"); await c.sync(); if(sh.protection.protected) sh.protection.unprotect(pw); await c.sync(); });
       try{ return await originalRepair(); }
-      finally{ await Excel.run(async c=>{ const sh=c.workbook.worksheets.getActiveWorksheet(); sh.load("protection/protected"); await c.sync(); if(sh.protection.protected) sh.protection.unprotect(pw); workingLock(sh,pw); await c.sync(); }); }
+      finally{ await Excel.run(async c=>{ const sh=c.workbook.worksheets.getActiveWorksheet(); sh.load("protection/protected"); await c.sync(); if(sh.protection.protected) sh.protection.unprotect(pw); if(!isGlobalUnlockMode()) workingLock(sh,pw); await c.sync(); }); }
     };
   }
 }
@@ -74,8 +84,10 @@ async function failClosedRecovery(sourceName,newName,pw){
       const wb=c.workbook,sheets=wb.worksheets; wb.protection.load("protected"); sheets.load("items/name,items/protection/protected"); await c.sync();
       for(const sh of sheets.items){
         if(sh.protection.protected){ try{ sh.protection.unprotect(pw); }catch(_){} }
-        if(sh.name===sourceName) workingLock(sh,pw);
-        else if(sh.name===newName) fullLock(sh,pw);
+        if(!isGlobalUnlockMode()){
+          if(sh.name===sourceName) workingLock(sh,pw);
+          else if(sh.name===newName) fullLock(sh,pw);
+        }
       }
       if(!wb.protection.protected) wb.protection.protect(pw);
       await c.sync();
@@ -87,6 +99,8 @@ function startSecurityUi(){
   Office.onReady(async info=>{
     if(info.host!==Office.HostType.Excel) return;
     by("setupSecurityBtn").addEventListener("click",setupSecurity);
+    by("adminUnlockAllSheetsBtn").addEventListener("click",adminUnlockAllSheets);
+    by("adminLockAllSheetsBtn").addEventListener("click",adminLockAllSheets);
     by("adminUnlockSheetBtn").addEventListener("click",adminUnlockSheet);
     by("adminWorkingLockBtn").addEventListener("click",adminWorkingLock);
     by("adminFullLockBtn").addEventListener("click",adminFullLock);
@@ -94,8 +108,24 @@ function startSecurityUi(){
     by("adminLockStructureBtn").addEventListener("click",adminLockStructure);
     by("adminSyncBtn").addEventListener("click",adminSync);
     const enabled=getSetting(CFG.enabled)===true, saved=getSetting(CFG.secret);
-    if(enabled&&saved){ secret=saved; setConfigured(true); setFormEnabled(true); try{await enforceStructure();setSecurityStatus("AMAN — struktur workbook terkunci.",false);}catch(e){setSecurityStatus(errText(e),true);} }
-    else{ setConfigured(false); setFormEnabled(false); setSecurityStatus("Belum diaktifkan. Buat PIN admin terlebih dahulu.",true); }
+    if(enabled&&saved){
+      secret=saved;
+      setConfigured(true);
+      setFormEnabled(true);
+      try{
+        if(isGlobalUnlockMode()){
+          await ensureAllSheetsUnlocked();
+          await enforceStructure();
+          setGlobalUnlockUi(true);
+          setSecurityStatus("ADMIN BEBAS — SEMUA SHEET TERBUKA tanpa batas waktu. Hanya tombol KUNCI SEMUA KEMBALI yang mengakhiri mode ini.",false);
+        }else{
+          setGlobalUnlockUi(false);
+          await enforceStructure();
+          setSecurityStatus("AMAN — struktur workbook terkunci.",false);
+        }
+      }catch(e){setSecurityStatus(errText(e),true);}
+    }
+    else{ setConfigured(false); setFormEnabled(false); setGlobalUnlockUi(false); setSecurityStatus("Belum diaktifkan. Buat PIN admin terlebih dahulu.",true); }
   });
 }
 
@@ -114,7 +144,7 @@ async function setupSecurity(){
       for(const sh of sheets.items){ if(sh.id===active.id)workingLock(sh,newPw); else fullLock(sh,newPw); }
       wb.protection.protect(newPw); await c.sync();
     });
-    setSetting(CFG.pinHash,await sha256(p1)); setSetting(CFG.secret,newPw); setSetting(CFG.enabled,true); setSetting(CFG.version,"4.0.1"); await saveSettings(); secret=newPw;
+    setSetting(CFG.pinHash,await sha256(p1)); setSetting(CFG.secret,newPw); setSetting(CFG.enabled,true); setSetting(CFG.globalUnlock,false); setSetting(CFG.version,"4.3.0"); await saveSettings(); secret=newPw;
     by("setupPin").value="";by("setupPin2").value="";by("oldPassword").value="";setConfigured(true);setFormEnabled(true);setSecurityStatus("AMAN — V4 aktif. Sheet aktif=kerja, sheet lama=full lock, struktur=lock.",false);
   }catch(e){setSecurityStatus(errText(e),true);}
 }
@@ -130,12 +160,115 @@ function fullLock(sh,pw){
 }
 async function enforceStructure(){const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(!wb.protection.protected){wb.protection.protect(pw);await c.sync();}});}
 async function checkPin(){const p=by("adminPin").value;if(!p)throw new Error("Masukkan PIN admin.");if(await sha256(p)!==getSetting(CFG.pinHash))throw new Error("PIN admin salah.");by("adminPin").value="";}
-async function adminUnlockSheet(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);await c.sync();setSecurityStatus(`ADMIN: sheet "${sh.name}" dibuka.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
-async function adminWorkingLock(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);workingLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" dikunci sebagai sheet kerja.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
-async function adminFullLock(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);fullLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+async function adminUnlockSheet(){try{await checkPin();if(isGlobalUnlockMode())return setSecurityStatus("Semua sheet sudah terbuka dalam mode ADMIN BEBAS.",false);const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);await c.sync();setSecurityStatus(`ADMIN: sheet "${sh.name}" dibuka.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+async function adminWorkingLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);workingLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" dikunci sebagai sheet kerja.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+async function adminFullLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);fullLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminUnlockStructure(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(wb.protection.protected)wb.protection.unprotect(pw);await c.sync();});if(relockTimer)clearTimeout(relockTimer);relockTimer=setTimeout(()=>enforceStructure().catch(()=>{}),120000);setSecurityStatus("ADMIN: struktur terbuka maksimal 2 menit. Delete/Rename aktif.",false);}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminLockStructure(){try{await checkPin();if(relockTimer)clearTimeout(relockTimer);relockTimer=null;await enforceStructure();setSecurityStatus("Struktur workbook dikunci kembali.",false);}catch(e){setSecurityStatus(errText(e),true);}}
-async function adminSync(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook,sheets=wb.worksheets,active=sheets.getActiveWorksheet();wb.protection.load("protected");sheets.load("items/id,items/name,items/protection/protected");active.load("id,name");await c.sync();if(wb.protection.protected)wb.protection.unprotect(pw);for(const sh of sheets.items){if(sh.protection.protected)sh.protection.unprotect(pw);if(sh.id===active.id)workingLock(sh,pw);else fullLock(sh,pw);}wb.protection.protect(pw);await c.sync();setSecurityStatus(`Sinkron selesai. "${active.name}"=kerja; lainnya=full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+async function adminSync(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook,sheets=wb.worksheets,active=sheets.getActiveWorksheet();wb.protection.load("protected");sheets.load("items/id,items/name,items/protection/protected");active.load("id,name");await c.sync();if(wb.protection.protected)wb.protection.unprotect(pw);for(const sh of sheets.items){if(sh.protection.protected)sh.protection.unprotect(pw);if(sh.id===active.id)workingLock(sh,pw);else fullLock(sh,pw);}wb.protection.protect(pw);await c.sync();setSecurityStatus(`Sinkron selesai. "${active.name}"=kerja; lainnya=full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+
+async function adminUnlockAllSheets(){
+  try{
+    await checkPin();
+    const pw=requireSecret();
+    setSecurityStatus("ADMIN: membuka seluruh sheet…",false);
+    await Excel.run(async c=>{
+      const wb=c.workbook,sheets=wb.worksheets;
+      wb.protection.load("protected");
+      sheets.load("items/name,items/protection/protected");
+      await c.sync();
+      for(const sh of sheets.items){
+        if(sh.protection.protected) sh.protection.unprotect(pw);
+      }
+      // Struktur workbook tetap dikunci; yang dibuka tanpa batas hanyalah seluruh worksheet.
+      if(!wb.protection.protected) wb.protection.protect(pw);
+      await c.sync();
+    });
+    setSetting(CFG.globalUnlock,true);
+    await saveSettings();
+    if(typeof clearAdminSheetAutoLockState==="function"){
+      try{await clearAdminSheetAutoLockState();}catch(_){}
+    }
+    setGlobalUnlockUi(true);
+    setSecurityStatus("ADMIN BEBAS — SEMUA SHEET TERBUKA tanpa batas waktu. Tidak ada auto-lock sampai admin memilih KUNCI SEMUA KEMBALI.",false);
+  }catch(e){setSecurityStatus(errText(e),true);}
+}
+
+async function adminLockAllSheets(){
+  try{
+    await checkPin();
+    const pw=requireSecret();
+    const shiftId=getSetting("hitunganV4.shiftWorkSheetId");
+    const shiftUntil=Number(getSetting("hitunganV4.shiftWorkUntil"));
+    const validShift=Boolean(shiftId&&Number.isFinite(shiftUntil)&&Date.now()<shiftUntil);
+    setSecurityStatus("ADMIN: mengunci kembali seluruh sheet…",false);
+    const result=await Excel.run(async c=>{
+      const wb=c.workbook,sheets=wb.worksheets;
+      wb.protection.load("protected");
+      sheets.load("items/id,items/name,items/protection/protected");
+      await c.sync();
+      if(wb.protection.protected) wb.protection.unprotect(pw);
+      let workingName="";
+      for(const sh of sheets.items){
+        if(sh.protection.protected) sh.protection.unprotect(pw);
+        if(validShift&&String(sh.id)===String(shiftId)){
+          workingLock(sh,pw);
+          workingName=sh.name;
+        }else{
+          fullLock(sh,pw);
+        }
+      }
+      wb.protection.protect(pw);
+      await c.sync();
+      return workingName;
+    });
+    setSetting(CFG.globalUnlock,false);
+    await saveSettings();
+    if(!validShift&&typeof clearShiftWorkWindowState==="function"){
+      try{await clearShiftWorkWindowState();}catch(_){}
+    }
+    setGlobalUnlockUi(false);
+    setSecurityStatus(
+      result
+        ? `MODE NORMAL — semua sheet dikunci kembali; "${result}" tetap sebagai sheet kerja karena shift masih aktif.`
+        : "MODE NORMAL — seluruh sheet sudah FULL LOCK dan struktur workbook terkunci kembali.",
+      false
+    );
+  }catch(e){setSecurityStatus(errText(e),true);}
+}
+
+async function ensureAllSheetsUnlocked(){
+  if(!isGlobalUnlockMode()) return;
+  const pw=requireSecret();
+  await Excel.run(async c=>{
+    const sheets=c.workbook.worksheets;
+    sheets.load("items/protection/protected");
+    await c.sync();
+    for(const sh of sheets.items){
+      if(sh.protection.protected) sh.protection.unprotect(pw);
+    }
+    await c.sync();
+  });
+}
+
+function isGlobalUnlockMode(){
+  const v=getSetting(CFG.globalUnlock);
+  return v===true||String(v).toLowerCase()==="true";
+}
+
+function assertGlobalUnlockOff(){
+  if(isGlobalUnlockMode()) throw new Error('Mode BUKA SEMUA SHEET masih aktif. Gunakan tombol "KUNCI SEMUA KEMBALI" untuk mengakhiri mode admin bebas.');
+}
+
+function setGlobalUnlockUi(on){
+  const open=by("adminUnlockAllSheetsBtn"),close=by("adminLockAllSheetsBtn"),hint=by("globalUnlockHint");
+  if(open) open.disabled=Boolean(on);
+  if(close) close.disabled=!on;
+  ["adminUnlockSheetBtn","adminWorkingLockBtn","adminFullLockBtn","adminSyncBtn"].forEach(id=>{const el=by(id);if(el)el.disabled=Boolean(on);});
+  if(hint) hint.textContent=on
+    ? "AKTIF: semua sheet terbuka tanpa batas waktu. Timer dan fail-safe tidak akan mengunci sheet sampai admin mengunci kembali."
+    : "Mode ini membutuhkan PIN admin. Jika dibuka, semua sheet tetap terbuka tanpa batas waktu sampai dikunci kembali oleh admin.";
+}
 
 function requireSecret(){const s=secret||getSetting(CFG.secret);if(!s)throw new Error("Pengaman V4 belum diaktifkan.");secret=s;return s;}
 function setConfigured(ok){by("securitySetup").hidden=ok;by("adminSecurity").hidden=!ok;}
