@@ -1,7 +1,7 @@
 "use strict";
 
 // V4 safety rules:
-// 1) Sheet baru berstatus sheet kerja maksimal 2,5 jam sejak selesai dibuat.
+// 1) Sheet baru berstatus sheet kerja maksimal 2 jam sejak selesai dibuat.
 // 2) Karyawan boleh menutup shift lebih cepat tanpa PIN; hasilnya full lock.
 // 3) Setelah full lock, hanya aksi Admin/PIN yang dapat menjadikannya sheet kerja lagi.
 // 4) Admin -> Buka Sheet Aktif tetap punya safety-net 15 menit.
@@ -11,7 +11,10 @@ const ADMIN_UNLOCK_SHEET_ID_KEY = "hitunganV4.adminUnlockSheetId";
 const ADMIN_UNLOCK_SHEET_NAME_KEY = "hitunganV4.adminUnlockSheetName";
 const ADMIN_UNLOCK_UNTIL_KEY = "hitunganV4.adminUnlockUntil";
 
-const SHIFT_WORK_WINDOW_MS = 2.5 * 60 * 60 * 1000;
+const SHIFT_WORK_WINDOW_MS = 2 * 60 * 60 * 1000;
+const GLOBAL_UNLOCK_WINDOW_MS = 90 * 60 * 1000;
+const GLOBAL_UNLOCK_UNTIL_KEY = "hitunganV4.globalUnlockUntil";
+let globalUnlockRelockTimer = null;
 const SHIFT_SHEET_ID_KEY = "hitunganV4.shiftWorkSheetId";
 const SHIFT_SHEET_NAME_KEY = "hitunganV4.shiftWorkSheetName";
 const SHIFT_CREATED_AT_KEY = "hitunganV4.shiftCreatedAt";
@@ -37,6 +40,7 @@ Office.onReady((info) => {
   ensureEmployeeShiftUi();
   waitAndWrapShiftCreate();
 
+  restoreGlobalUnlockWindow().catch(() => {});
   restoreAdminSheetAutoLock().catch(() => {});
   restoreShiftWorkWindow().catch(() => {});
 
@@ -108,7 +112,7 @@ function waitAndWrapShiftCreate() {
 
       if (typeof createNewDaySheet !== "function" || typeof requireSecret !== "function") return;
 
-      // Tunggu wrapper Tambah Display selesai agar pencatatan 2,5 jam menjadi
+      // Tunggu wrapper Tambah Display selesai agar pencatatan 2 jam menjadi
       // lapisan terluar dan baru dimulai setelah seluruh proses pembuatan sheet selesai.
       if (typeof displayTransferWrapped !== "undefined" && !displayTransferWrapped && attempts < 80) return;
 
@@ -151,7 +155,7 @@ async function registerNewShiftWorkWindow(expectedSheetName) {
 
   scheduleShiftWorkRelock(until);
   await refreshShiftUi();
-  setSecurityStatus(`SHIFT AKTIF — sheet "${info.name}" dapat diisi maksimal 2 jam 30 menit. Setelah itu otomatis full lock.`, false);
+  setSecurityStatus(`SHIFT AKTIF — sheet "${info.name}" dapat diisi maksimal 2 jam. Setelah itu otomatis full lock.`, false);
 }
 
 async function restoreShiftWorkWindow() {
@@ -217,10 +221,10 @@ async function expireShiftWorkWindow() {
 
     await clearShiftWorkWindowState();
     await refreshShiftUi();
-    setSecurityStatus(`BATAS WAKTU SELESAI — sheet "${result}" otomatis FULL LOCK setelah 2 jam 30 menit. Hanya admin/PIN yang dapat menjadikannya sheet kerja lagi.`, false);
+    setSecurityStatus(`BATAS WAKTU SELESAI — sheet "${result}" otomatis FULL LOCK setelah 2 jam. Hanya admin/PIN yang dapat menjadikannya sheet kerja lagi.`, false);
   } catch (e) {
     // Pertahankan state agar V4 mencoba lagi saat panel dibuka berikutnya.
-    setSecurityStatus(`AUTO-LOCK 2,5 jam belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
+    setSecurityStatus(`AUTO-LOCK 2 jam belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
   }
 }
 
@@ -285,7 +289,7 @@ async function refreshShiftUi() {
   }
 
   if (!sheetId || !Number.isFinite(until)) {
-    el.textContent = "Tidak ada shift dalam masa pengisian 2,5 jam.";
+    el.textContent = "Tidak ada shift dalam masa pengisian 2 jam.";
     btn.disabled = true;
     return;
   }
@@ -415,7 +419,7 @@ async function relockPendingAdminSheet() {
     });
 
     await clearAdminSheetAutoLockState();
-    const mode = shouldReturnToWorking ? "sheet kerja (masih dalam 2,5 jam)" : "full lock";
+    const mode = shouldReturnToWorking ? "sheet kerja (masih dalam 2 jam)" : "full lock";
     setSecurityStatus(`AUTO-LOCK ADMIN: sheet "${result}" dikunci kembali sebagai ${mode}.`, false);
   } catch (e) {
     setSecurityStatus(`AUTO-LOCK admin belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
@@ -444,5 +448,47 @@ async function clearAdminSheetAutoLockState() {
   settings.remove(ADMIN_UNLOCK_SHEET_ID_KEY);
   settings.remove(ADMIN_UNLOCK_SHEET_NAME_KEY);
   settings.remove(ADMIN_UNLOCK_UNTIL_KEY);
+  await saveSettings();
+}
+
+
+// Global unlock is always temporary (90 minutes), persisted with workbook settings.
+async function beginGlobalUnlockWindow() {
+  const until = Date.now() + GLOBAL_UNLOCK_WINDOW_MS;
+  setSetting(GLOBAL_UNLOCK_UNTIL_KEY, until);
+  await saveSettings();
+  scheduleGlobalUnlockRelock(until);
+  return until;
+}
+function scheduleGlobalUnlockRelock(until) {
+  if (globalUnlockRelockTimer) clearTimeout(globalUnlockRelockTimer);
+  globalUnlockRelockTimer = setTimeout(() => {
+    expireGlobalUnlockWindow().catch(e => setSecurityStatus(errText(e), true));
+  }, Math.max(0, Number(until) - Date.now()));
+}
+async function restoreGlobalUnlockWindow() {
+  if (!persistentAdminUnlockActive()) return clearGlobalUnlockWindowState();
+  let until = Number(getSetting(GLOBAL_UNLOCK_UNTIL_KEY));
+  if (!Number.isFinite(until) || until <= 0) {
+    // Migration from unlimited mode: give existing unlocked workbooks a single
+    // 90-minute safety window starting the first time this version opens.
+    until = await beginGlobalUnlockWindow();
+  }
+  if (Date.now() >= until) await expireGlobalUnlockWindow();
+  else scheduleGlobalUnlockRelock(until);
+}
+async function expireGlobalUnlockWindow() {
+  if (!persistentAdminUnlockActive()) return clearGlobalUnlockWindowState();
+  const until = Number(getSetting(GLOBAL_UNLOCK_UNTIL_KEY));
+  if (Number.isFinite(until) && until > Date.now()) return scheduleGlobalUnlockRelock(until);
+  if (typeof lockAllSheetsCore !== "function") throw new Error("Mesin penguncian belum siap.");
+  await lockAllSheetsCore("WAKTU ADMIN HABIS — 1,5 jam berlalu. Sheet kerja yang masih dalam 2 jam tetap bisa diisi.");
+}
+async function clearGlobalUnlockWindowState() {
+  if (globalUnlockRelockTimer) clearTimeout(globalUnlockRelockTimer);
+  globalUnlockRelockTimer = null;
+  if (typeof getSetting !== "function") return;
+  if (getSetting(GLOBAL_UNLOCK_UNTIL_KEY) == null) return;
+  Office.context.document.settings.remove(GLOBAL_UNLOCK_UNTIL_KEY);
   await saveSettings();
 }
