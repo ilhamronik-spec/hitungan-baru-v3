@@ -114,10 +114,11 @@ function startSecurityUi(){
       setFormEnabled(true);
       try{
         if(isGlobalUnlockMode()){
-          await ensureAllSheetsUnlocked();
+          await restoreGlobalUnlockWindow();
+          if(isGlobalUnlockMode()) await ensureAllSheetsUnlocked();
           await enforceStructure();
-          setGlobalUnlockUi(true);
-          setSecurityStatus("ADMIN BEBAS — SEMUA SHEET TERBUKA tanpa batas waktu. Hanya tombol KUNCI SEMUA KEMBALI yang mengakhiri mode ini.",false);
+          setGlobalUnlockUi(isGlobalUnlockMode());
+          setSecurityStatus(isGlobalUnlockMode()?"ADMIN BEBAS — sheet terbuka maksimal 1,5 jam.":"AMAN — batas buka semua sheet selesai; proteksi kembali aktif.",false);
         }else{
           setGlobalUnlockUi(false);
           await enforceStructure();
@@ -180,23 +181,30 @@ async function adminUnlockAllSheets(){
       for(const sh of sheets.items){
         if(sh.protection.protected) sh.protection.unprotect(pw);
       }
-      // Struktur workbook tetap dikunci; yang dibuka tanpa batas hanyalah seluruh worksheet.
+      // Struktur workbook tetap dikunci; yang dibuka maksimal 1,5 jam hanyalah seluruh worksheet.
       if(!wb.protection.protected) wb.protection.protect(pw);
       await c.sync();
     });
     setSetting(CFG.globalUnlock,true);
     await saveSettings();
+    await beginGlobalUnlockWindow();
     if(typeof clearAdminSheetAutoLockState==="function"){
       try{await clearAdminSheetAutoLockState();}catch(_){}
     }
     setGlobalUnlockUi(true);
-    setSecurityStatus("ADMIN BEBAS — SEMUA SHEET TERBUKA tanpa batas waktu. Tidak ada auto-lock sampai admin memilih KUNCI SEMUA KEMBALI.",false);
+    setSecurityStatus("ADMIN BEBAS — SEMUA SHEET TERBUKA maksimal 1,5 jam. Tidak ada auto-lock sampai admin memilih KUNCI SEMUA KEMBALI.",false);
   }catch(e){setSecurityStatus(errText(e),true);}
 }
 
 async function adminLockAllSheets(){
   try{
     await checkPin();
+    await lockAllSheetsCore();
+  }catch(e){setSecurityStatus(errText(e),true);}
+}
+
+async function lockAllSheetsCore(statusOverride){
+  try{
     const pw=requireSecret();
     const shiftId=getSetting("hitunganV4.shiftWorkSheetId");
     const shiftUntil=Number(getSetting("hitunganV4.shiftWorkUntil"));
@@ -224,14 +232,15 @@ async function adminLockAllSheets(){
     });
     setSetting(CFG.globalUnlock,false);
     await saveSettings();
+    if(typeof clearGlobalUnlockWindowState==="function") await clearGlobalUnlockWindowState();
     if(!validShift&&typeof clearShiftWorkWindowState==="function"){
       try{await clearShiftWorkWindowState();}catch(_){}
     }
     setGlobalUnlockUi(false);
     setSecurityStatus(
-      result
+      statusOverride || (result
         ? `MODE NORMAL — semua sheet dikunci kembali; "${result}" tetap sebagai sheet kerja karena shift masih aktif.`
-        : "MODE NORMAL — seluruh sheet sudah FULL LOCK dan struktur workbook terkunci kembali.",
+        : "MODE NORMAL — seluruh sheet sudah FULL LOCK dan struktur workbook terkunci kembali."),
       false
     );
   }catch(e){setSecurityStatus(errText(e),true);}
@@ -266,8 +275,8 @@ function setGlobalUnlockUi(on){
   if(close) close.disabled=!on;
   ["adminUnlockSheetBtn","adminWorkingLockBtn","adminFullLockBtn","adminSyncBtn"].forEach(id=>{const el=by(id);if(el)el.disabled=Boolean(on);});
   if(hint) hint.textContent=on
-    ? "AKTIF: semua sheet terbuka tanpa batas waktu. Timer dan fail-safe tidak akan mengunci sheet sampai admin mengunci kembali."
-    : "Mode ini membutuhkan PIN admin. Jika dibuka, semua sheet tetap terbuka tanpa batas waktu sampai dikunci kembali oleh admin.";
+    ? "AKTIF: semua sheet terbuka maksimal 1,5 jam, lalu otomatis dikunci. Shift yang masih aktif tetap dapat diisi."
+    : "Dengan PIN admin, buka semua sheet maksimal 1,5 jam. Setelahnya sistem mengunci otomatis.";
 }
 
 function requireSecret(){const s=secret||getSetting(CFG.secret);if(!s)throw new Error("Pengaman V4 belum diaktifkan.");secret=s;return s;}
