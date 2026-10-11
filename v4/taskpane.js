@@ -12,6 +12,7 @@ const LOCK_RANGES = [
 let secret = null;
 let relockTimer = null;
 let v2Loaded = false;
+let adminSessionAuthenticated = false;
 
 loadV2();
 
@@ -39,12 +40,16 @@ function installWrappers(){
     });
     try{
       const result=await originalCreate(person,sheetName,purchaseData);
+      let pricingResult={applied:[],skipped:[],alerts:[]};
       await Excel.run(async c=>{
         const wb=c.workbook, sheets=wb.worksheets, newest=sheets.getActiveWorksheet(), old=sheets.getItem(sourceName);
         wb.protection.load("protected"); newest.load("protection/protected"); old.load("protection/protected");
         await c.sync();
         if(newest.protection.protected) newest.protection.unprotect(pw);
         if(old.protection.protected) old.protection.unprotect(pw);
+        if(typeof applyNextShiftPricing==="function"){
+          pricingResult=await applyNextShiftPricing(c,newest,sourceName,purchaseData);
+        }
         if(isGlobalUnlockMode()){
           // Mode admin persisten: sheet lama dan baru harus tetap terbuka.
           if(!wb.protection.protected) wb.protection.protect(pw);
@@ -59,7 +64,14 @@ function installWrappers(){
       if(typeof registerNewShiftWorkWindow==="function"){
         await registerNewShiftWorkWindow(sheetName);
       }
-      setSecurityStatus(
+      if(pricingResult.applied.length && typeof consumeEffectivePrices==="function"){
+        await consumeEffectivePrices(pricingResult.applied);
+      }
+      if(pricingResult.skipped.length){
+        setSecurityStatus("PERINGATAN HARGA: "+pricingResult.skipped.join(", ")+" belum diterapkan; harga pending tetap tersimpan.",true);
+      }else if(pricingResult.alerts.length){
+        setSecurityStatus("PERINGATAN MARGIN < Rp1.000: "+pricingResult.alerts.join("; "),true);
+      }else setSecurityStatus(
         isGlobalUnlockMode()
           ? "ADMIN BEBAS — hari baru selesai dan semua sheet tetap terbuka sampai dikunci kembali."
           : "AMAN — hari baru selesai, sheet lama full lock, struktur terkunci.",
@@ -114,6 +126,7 @@ function startSecurityUi(){
     by("adminSyncBtn").addEventListener("click",adminSync);
     by("adminViewMinusBtn").addEventListener("click",adminViewMinus);
     by("adminHideMinusBtn").addEventListener("click",hideMinusPanel);
+    setupRoleMenus();
     const enabled=getSetting(CFG.enabled)===true, saved=getSetting(CFG.secret);
     if(enabled&&saved){
       secret=saved;
@@ -203,7 +216,57 @@ async function maskExistingClosedSheets(){
 }
 
 async function enforceStructure(){const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(!wb.protection.protected){wb.protection.protect(pw);await c.sync();}});}
-async function checkPin(){const p=by("adminPin").value;if(!p)throw new Error("Masukkan PIN admin.");if(await sha256(p)!==getSetting(CFG.pinHash))throw new Error("PIN admin salah.");by("adminPin").value="";}
+async function checkPin(){if(adminSessionAuthenticated)return;throw new Error("Masuk ke Menu Admin menggunakan PIN terlebih dahulu.");}
+
+function showRoleMenu(role){
+  const choice=by("menuChoice"),employee=by("employeeWorkspace"),gate=by("adminGate"),admin=by("adminWorkspace");
+  choice.hidden=role!=="home";
+  employee.hidden=role!=="employee";
+  gate.hidden=role!=="admin" || adminSessionAuthenticated;
+  admin.hidden=role!=="admin" || !adminSessionAuthenticated;
+  if(role!=="admin"){
+    adminSessionAuthenticated=false;
+    gate.hidden=true;
+    admin.hidden=true;
+    const pin=by("adminGatePin");if(pin)pin.value="";
+    const err=by("adminGateStatus");if(err)err.textContent="";
+    if(typeof hideMinusPanel==="function")hideMinusPanel();
+    if(typeof sellingEditorRows!=="undefined")sellingEditorRows=[];
+    const list=by("sellingPriceRows");if(list)list.replaceChildren();
+  }
+}
+function setupRoleMenus(){
+  by("menuEmployeeBtn").addEventListener("click",()=>showRoleMenu("employee"));
+  by("menuAdminBtn").addEventListener("click",()=>showRoleMenu("admin"));
+  by("employeeBackBtn").addEventListener("click",()=>showRoleMenu("home"));
+  by("adminLogoutBtn").addEventListener("click",()=>showRoleMenu("home"));
+  by("adminGateBackBtn").addEventListener("click",()=>showRoleMenu("home"));
+  by("adminGateLoginBtn").addEventListener("click",unlockAdminMenu);
+  by("adminGatePin").addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();unlockAdminMenu();}});
+  showRoleMenu("home");
+}
+async function unlockAdminMenu(){
+  const status=by("adminGateStatus");
+  try{
+    if(!getSetting(CFG.enabled))throw new Error("Pengaman admin belum diaktifkan.");
+    const pin=by("adminGatePin").value;
+    if(!pin)throw new Error("Masukkan PIN admin.");
+    if(await sha256(pin)!==getSetting(CFG.pinHash))throw new Error("PIN admin salah.");
+    by("adminGatePin").value="";
+    adminSessionAuthenticated=true;
+    by("adminGate").hidden=true;
+    by("adminWorkspace").hidden=false;
+    by("adminSecurity").open=true;
+    status.textContent="";
+    if(typeof loadSellingPriceSheets==="function")await loadSellingPriceSheets();
+  }catch(e){
+    // A failure loading the optional editor must not leave a partially-open gate.
+    if(adminSessionAuthenticated){
+      setSellingStatus("Menu admin terbuka, tetapi daftar harga belum dimuat: "+errText(e),true);
+    }else status.textContent=errText(e);
+  }
+}
+
 async function adminUnlockSheet(){try{await checkPin();if(isGlobalUnlockMode())return setSecurityStatus("Semua sheet sudah terbuka dalam mode ADMIN BEBAS.",false);const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);await c.sync();setSecurityStatus(`ADMIN: sheet "${sh.name}" dibuka.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminWorkingLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);workingLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" dikunci sebagai sheet kerja.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminFullLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);fullLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
