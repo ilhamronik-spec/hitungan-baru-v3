@@ -7,8 +7,8 @@ const LOW_MARGIN_FILL="#FFC7CE";
 const LOW_MARGIN_FONT="#9C0006";
 const MIN_MARGIN_RUPIAH=1000;
 const SELLING_PRICE_GROUPS={
-  paket:{start:6,end:75,label:"Paket"},
-  rokok:{start:178,end:238,label:"Rokok"}
+  paket:{start:6,end:75,label:"Paket",costColumn:"B",sellColumn:"C"},
+  rokok:{start:178,end:238,label:"Rokok",costColumn:"C",sellColumn:"B",marginColumn:"E"}
 };
 let sellingEditorRows=[];
 let sellingEditorSheet="";
@@ -69,12 +69,19 @@ async function loadSellingPriceRows(){
   if(!sellingEditorSheet||!g)return;
   const rows=await Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(sellingEditorSheet);
-    const block=sh.getRange("A"+g.start+":C"+g.end);
-    block.load("values");
+    // Use the exact row order and product filtering of the employee shopping menu.
+    // Paket: B=harga dasar, C=harga jual. Rokok: B=harga jual, C=harga dasar.
+    const range=sh.getRange("A"+(g.start-1)+":C"+g.end);
+    range.load("values");
     await ctx.sync();
-    return block.values.map((v,i)=>({
-      row:g.start+i,name:String(v[0]??"").trim(),oldPrice:numericSellingPrice(v[2])
-    })).filter(r=>r.name);
+    return range.values.map((values,i)=>{
+      const row=g.start-1+i;
+      const name=String(values[0]??"").trim();
+      const oldPrice=numericSellingPrice(values[g.sellColumn==="B"?1:2]);
+      const oldCost=numericSellingPrice(values[g.costColumn==="B"?1:2]);
+      const isProduct=Boolean(name&&Number.isFinite(oldCost)&&oldCost>0);
+      return {row,name,oldPrice,oldCost,isProduct,kind:isProduct?"product":"heading"};
+    }).filter(item=>item.name && (item.isProduct||item.row>=g.start));
   });
   sellingEditorRows=rows;
   renderSellingPriceRows();
@@ -86,8 +93,33 @@ function renderSellingPriceRows(){
   container.replaceChildren();
   const q=String(document.getElementById("sellingPriceSearch")?.value||"").toLowerCase().trim();
   const pending=sellingPriceQueue();
-  const matches=sellingEditorRows.filter(x=>x.name.toLowerCase().includes(q));
+  const matches=sellingEditorRows.filter(x=>x.isProduct && x.name.toLowerCase().includes(q));
+  // Preserve original spreadsheet order; section headings follow the Belanja menu.
+  let lastSection="";
+  for(const entry of sellingEditorRows){
+    if(!entry.isProduct && entry.name && entry.row<=(matches.at(-1)?.row??-1)){
+      const segment=matches.some(m=>m.row>entry.row && (sellingEditorRows.findLast(x=>x.row<m.row&&!x.isProduct)?.row??-1)===entry.row);
+      if(segment && (!q||entry.name.toLowerCase().includes(q)||matches.length)){
+        const header=document.createElement("div");
+        header.className="product-summary";
+        header.textContent=entry.name;
+        header.dataset.sectionRow=String(entry.row);
+        container.appendChild(header);
+      }
+    }
+  }
+  // Heading elements are positioned with the corresponding products below.
+  const sectionHeaders=[...container.querySelectorAll("[data-section-row]")];
+  const sections=sectionHeaders.map(h=>({row:Number(h.dataset.sectionRow),node:h}));
+  container.replaceChildren();
+  let currentSection=-1;
   for(const item of matches){
+    const segment=sections.filter(x=>x.row<item.row).at(-1);
+    if(segment && segment.row!==currentSection){
+      const header=segment.node.cloneNode(true);
+      container.appendChild(header);
+      currentSection=segment.row;
+    }
     const row=document.createElement("div");
     row.className="product-row selling-edit-row";
     const label=document.createElement("label");
@@ -95,7 +127,7 @@ function renderSellingPriceRows(){
     label.textContent=item.name+" — baris "+item.row;
     const info=document.createElement("div");
     info.className="product-meta";
-    info.textContent="Harga sekarang: Rp "+(Number.isFinite(item.oldPrice)?item.oldPrice.toLocaleString("id-ID"):"-");
+    info.textContent="Harga jual ("+SELLING_PRICE_GROUPS[sellingEditorCategory].sellColumn+"): Rp "+(Number.isFinite(item.oldPrice)?item.oldPrice.toLocaleString("id-ID"):"-") + " • Harga dasar ("+SELLING_PRICE_GROUPS[sellingEditorCategory].costColumn+"): Rp "+(Number.isFinite(item.oldCost)?item.oldCost.toLocaleString("id-ID"):"-");
     const input=document.createElement("input");
     input.type="number"; input.min="0";input.step="1";
     input.placeholder="Harga jual baru (shift selanjutnya)";
@@ -188,7 +220,7 @@ async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
   for(const group of Object.keys(SELLING_PRICE_GROUPS)){
     const range=SELLING_PRICE_GROUPS[group];
     for(let row=range.start;row<=range.end;row++){
-      const cell=newSheet.getRange("C"+row);
+      const cell=newSheet.getRange(range.sellColumn+row);
       cell.format.fill.load("color");
       sellCells.push(cell);
     }
@@ -211,11 +243,11 @@ async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
       skipped.push(item.name+" (nama/baris tidak cocok)");
       continue;
     }
-    newSheet.getRange("C"+item.row).values=[[item.price]];
+    newSheet.getRange(cfg.sellColumn+item.row).values=[[item.price]];
     applied.push(item.id);
   }
   const sell= purchases.map(item=>({
-    item, cell:newSheet.getRange("C"+item.row)
+    item, cell:newSheet.getRange(SELLING_PRICE_GROUPS[item.group].sellColumn+item.row)
   }));
   sell.forEach(x=>x.cell.load("values"));
   await context.sync();
