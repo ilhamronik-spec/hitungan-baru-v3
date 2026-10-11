@@ -107,6 +107,8 @@ function startSecurityUi(){
     by("adminUnlockStructureBtn").addEventListener("click",adminUnlockStructure);
     by("adminLockStructureBtn").addEventListener("click",adminLockStructure);
     by("adminSyncBtn").addEventListener("click",adminSync);
+    by("adminViewMinusBtn").addEventListener("click",adminViewMinus);
+    by("adminHideMinusBtn").addEventListener("click",hideMinusPanel);
     const enabled=getSetting(CFG.enabled)===true, saved=getSetting(CFG.secret);
     if(enabled&&saved){
       secret=saved;
@@ -155,8 +157,13 @@ function workingLock(sh,pw){
   for(const a of LOCK_RANGES){const r=sh.getRange(a);r.format.protection.locked=true;r.format.protection.formulaHidden=true;}
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.unlocked,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
+const MINES_CELLS = ["D275","D276","G275","J274"];
+function maskMinusCells(sh){
+  for(const address of MINES_CELLS) sh.getRange(address).numberFormat = [[";;;"]];
+}
 function fullLock(sh,pw){
   const w=sh.getRange(WORK_AREA); w.format.protection.locked=true; w.format.protection.formulaHidden=true;
+  maskMinusCells(sh);
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.none,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
 async function enforceStructure(){const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(!wb.protection.protected){wb.protection.protect(pw);await c.sync();}});}
@@ -290,3 +297,43 @@ function saveSettings(){return new Promise((res,rej)=>Office.context.document.se
 async function sha256(t){const d=new TextEncoder().encode(t),h=await crypto.subtle.digest("SHA-256",d);return Array.from(new Uint8Array(h)).map(b=>b.toString(16).padStart(2,"0")).join("");}
 function randomSecret(){const b=new Uint8Array(24);crypto.getRandomValues(b);return Array.from(b).map(x=>x.toString(16).padStart(2,"0")).join("");}
 function errText(e){return e&&e.message?e.message:String(e||"Terjadi kesalahan.");}
+
+let minusPreviewTimer = null;
+function hideMinusPanel(){
+  const panel=by("minusPreview"), content=by("minusPreviewContent");
+  if(minusPreviewTimer){clearTimeout(minusPreviewTimer);minusPreviewTimer=null;}
+  if(content) content.replaceChildren();
+  if(panel) panel.hidden=true;
+}
+async function adminViewMinus(){
+  try{
+    hideMinusPanel();
+    await checkPin();
+    const data=await Excel.run(async context=>{
+      const sh=context.workbook.worksheets.getActiveWorksheet();
+      sh.load("name");
+      const ranges=MINES_CELLS.map(address=>sh.getRange(address));
+      ranges.forEach(r=>r.load("values,text"));
+      await context.sync();
+      return {name:sh.name, rows:MINES_CELLS.map((address,i)=>({
+        address, value:ranges[i].text[0][0],
+        raw:ranges[i].values[0][0]
+      }))};
+    });
+    const target=by("minusPreviewContent");
+    const heading=document.createElement("strong");
+    heading.textContent="Sheet: "+data.name;
+    target.appendChild(heading);
+    for(const row of data.rows){
+      const line=document.createElement("div");
+      line.style.padding="5px 0";
+      // text may be blank because the worksheet uses a hidden number format.
+      // raw numeric values remain accessible through the Office Excel API.
+      line.textContent=row.address+" : "+(row.raw===null||row.raw===""?"(kosong)":String(row.raw));
+      target.appendChild(line);
+    }
+    by("minusPreview").hidden=false;
+    minusPreviewTimer=setTimeout(hideMinusPanel,5*60*1000);
+    setSecurityStatus("Nilai mines ditampilkan untuk admin selama maksimal 5 menit. Angka tetap tersembunyi di worksheet.",false);
+  }catch(e){hideMinusPanel();setSecurityStatus(errText(e),true);}
+}
