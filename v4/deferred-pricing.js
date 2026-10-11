@@ -58,6 +58,33 @@ async function loadSellingPriceSheets(){
   await loadSellingPriceRows();
 }
 
+// Preserve the sheet's exact row index for edits while using the same
+// operator-prefix presentation as the employee Belanja product list.
+function buildSellingPriceCatalog(values, firstRow, group){
+  const cfg=SELLING_PRICE_GROUPS[group];
+  if(!cfg)throw new Error("Kategori harga tidak dikenal.");
+  let operator="";
+  const items=[];
+  for(let i=0;i<values.length;i++){
+    const v=values[i];
+    const row=firstRow+i;
+    const name=String(v[0]??"").trim();
+    if(!name)continue;
+    const oldPrice=numericSellingPrice(v[cfg.sellColumn==="B"?1:2]);
+    const oldCost=numericSellingPrice(v[cfg.costColumn==="B"?1:2]);
+    const isProduct=Boolean(row>=cfg.start && Number.isFinite(oldCost) && oldCost>0);
+    if(!isProduct){
+      if(group==="paket")operator=name;
+      continue;
+    }
+    const displayName=group==="paket" && operator
+      ? operator+" - "+name
+      : name;
+    items.push({row,name,operator,displayName,oldPrice,oldCost,isProduct:true});
+  }
+  return items;
+}
+
 async function loadSellingPriceRows(){
   if(typeof adminSessionAuthenticated!=="undefined"&&!adminSessionAuthenticated)return;
   const source=document.getElementById("sellingSourceSheet");
@@ -74,14 +101,7 @@ async function loadSellingPriceRows(){
     const range=sh.getRange("A"+from+":C"+g.end);
     range.load("values");
     await ctx.sync();
-    return range.values.map((v,i)=>{
-      const row=from+i;
-      const name=String(v[0]??"").trim();
-      const oldPrice=numericSellingPrice(v[g.sellColumn==="B"?1:2]);
-      const oldCost=numericSellingPrice(v[g.costColumn==="B"?1:2]);
-      const isProduct=Boolean(row>=g.start && name && Number.isFinite(oldCost) && oldCost>0);
-      return {row,name,oldPrice,oldCost,isProduct};
-    }).filter(r=>r.name);
+    return buildSellingPriceCatalog(range.values,from,sellingEditorCategory);
   });
   sellingEditorRows=rows;
   renderSellingPriceRows();
@@ -94,40 +114,33 @@ function renderSellingPriceRows(){
   const q=String(document.getElementById("sellingPriceSearch")?.value||"").toLowerCase().trim();
   const pending=sellingPriceQueue();
   const g=SELLING_PRICE_GROUPS[sellingEditorCategory];
-  const matches=sellingEditorRows.filter(item=>item.isProduct && item.name.toLowerCase().includes(q));
-  // Group headers are the same physical worksheet section rows, never products.
-  const headings=[];
-  if(sellingEditorCategory==="paket"){
-    for(const item of sellingEditorRows){
-      if(!item.isProduct)headings.push(item);
-    }
-  }
-  let previousHeading=-1;
+  const matches=sellingEditorRows.filter(item=>item.displayName.toLocaleLowerCase("id-ID").includes(q));
+  // Show operator groups only when necessary, in the same Excel row order.
+  let lastOperator="";
   for(const item of matches){
-    const section=headings.filter(h=>h.row<item.row).at(-1);
-    if(section && section.row!==previousHeading){
-      const title=document.createElement("div");
-      title.className="product-summary selling-section-heading";
-      title.textContent=section.name;
-      container.appendChild(title);
-      previousHeading=section.row;
+    if(sellingEditorCategory==="paket" && item.operator!==lastOperator){
+      const section=document.createElement("div");
+      section.className="product-summary selling-section-heading";
+      section.textContent=item.operator || "Paket";
+      container.appendChild(section);
+      lastOperator=item.operator;
     }
     const row=document.createElement("article");
     row.className="product-row selling-edit-row";
     row.dataset.sheetRow=String(item.row);
     const label=document.createElement("div");
     label.className="product-name";
-    label.textContent=item.name+" · Baris "+item.row;
+    label.textContent=item.displayName;
     const info=document.createElement("div");
     info.className="product-meta";
     const rp=n=>Number.isFinite(n) && n>0 ? n.toLocaleString("id-ID") : "-";
-    info.textContent="Harga jual "+g.sellColumn+": Rp "+rp(item.oldPrice)
+    info.textContent="Baris "+item.row+" | Harga jual "+g.sellColumn+": Rp "+rp(item.oldPrice)
       +" | Harga dasar "+g.costColumn+": Rp "+rp(item.oldCost);
     const input=document.createElement("input");
     input.type="number";
     input.min="1"; input.step="1";
     input.placeholder="Harga jual untuk shift berikutnya";
-    input.setAttribute("aria-label","Harga baru "+item.name);
+    input.setAttribute("aria-label","Harga baru "+item.displayName);
     const found=pending.find(p=>p.source===sellingEditorSheet && p.group===sellingEditorCategory && p.row===item.row);
     if(found)input.value=String(found.price);
     const save=document.createElement("button");
@@ -145,7 +158,7 @@ function renderSellingPriceRows(){
           name:item.name,price,savedAt:Date.now(),id:key});
         setSetting(PRICE_PENDING_KEY,clean);
         await saveSettings();
-        setSellingStatus(item.name+": harga Rp "+price.toLocaleString("id-ID")
+        setSellingStatus(item.displayName+": harga Rp "+price.toLocaleString("id-ID")
           +" DIJADWALKAN untuk sheet sesudah '"+sellingEditorSheet+"'. Sheet saat ini tetap.");
         renderSellingPriceRows();
       }catch(e){setSellingStatus(errText(e),true);}
@@ -163,7 +176,7 @@ function renderSellingPriceRows(){
           setSetting(PRICE_PENDING_KEY,clean);
           await saveSettings();
           renderSellingPriceRows();
-          setSellingStatus("Harga pending "+item.name+" dibatalkan.");
+          setSellingStatus("Harga pending "+item.displayName+" dibatalkan.");
         }catch(e){setSellingStatus(errText(e),true);}
       });
       row.appendChild(cancel);
