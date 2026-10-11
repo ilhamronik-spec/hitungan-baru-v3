@@ -3,9 +3,13 @@
 // V5 — Margins are evaluated on every worksheet from that worksheet's own
 // B (harga dasar) and C (harga jual). Color is applied only to item names in A.
 // Conditional formatting is dynamic and persists when Excel recalculates.
-const HB_MARGIN_BUILD = "5.1.0";
+const HB_MARGIN_BUILD = "5.2.0";
 const HB_MARGIN_TAG = "HB_MARGIN_V51";
 const HB_MARGIN_OLD_TAG = "HB_MARGIN_V50";
+const HB_MARGIN_CIGARETTE_OLD_TAG = "HB_MARGIN_V51_178_";
+const HB_CIGARETTE_ROWS_START = 178;
+const HB_CIGARETTE_ROWS_END = 238;
+const HB_CIGARETTE_NORMAL = {fill:"#FFFFFF",font:"#111827"};
 const HB_MARGIN_GROUPS = [
   { name:"Paket", first:6, last:75, mode:"packet" },
   { name:"Rokok", first:178, last:238, mode:"cigarette" }
@@ -90,39 +94,86 @@ async function hbMarginInspectRules(context,sheet){
   return groups;
 }
 
-function hbMarginNeedsMigration(groups){
+
+function hbMarginIsLegacyCigaretteRule(formula) {
+  const s=String(formula||"").toUpperCase();
+  return s.includes("HB_MARGIN_V50_178_") || s.includes("HB_MARGIN_V51_178_");
+}
+function hbMarginNeedsMigration(groups) {
   return groups.some(({g,custom})=>{
     const formulas=custom.map(f=>String(f.custom.rule.formula||"").toUpperCase());
+    if(g.mode==="cigarette")return formulas.some(hbMarginIsLegacyCigaretteRule);
     if(formulas.some(f=>f.includes(HB_MARGIN_OLD_TAG)))return true;
     return HB_MARGIN_RULES.some(rule=>!formulas.some(f=>f.includes((HB_MARGIN_TAG+"_"+g.first+"_"+rule.key).toUpperCase())));
   });
 }
+function hbCigaretteRowStyle(row) {
+  const [name,selling,cost,unused,marginRaw]=row;
+  if(!String(name??"").trim())return null;
+  if(typeof selling!=="number" || !Number.isFinite(selling) || selling<=0)return null;
+  if(typeof cost!=="number" || !Number.isFinite(cost) || cost<=0)return null;
+  // The sheet's own E column is the authoritative cigarette margin.
+  const margin=typeof marginRaw==="number"&&Number.isFinite(marginRaw)?marginRaw:NaN;
+  const band=hbMarginBand(margin);
+  const matched=HB_MARGIN_RULES.find(rule=>rule.key===band);
+  return {fill:matched?.fill||HB_CIGARETTE_NORMAL.fill,
+          font:matched?.font||HB_CIGARETTE_NORMAL.font,
+          band,margin};
+}
+async function hbReadCigaretteDisplay(context,sheet){
+  const data=sheet.getRange("A"+HB_CIGARETTE_ROWS_START+":E"+HB_CIGARETTE_ROWS_END);
+  data.load("values");
+  const names=[];
+  for(let row=HB_CIGARETTE_ROWS_START;row<=HB_CIGARETTE_ROWS_END;row++){
+    const cell=sheet.getRange("A"+row);
+    cell.format.fill.load("color");
+    cell.format.font.load("color");
+    names.push(cell);
+  }
+  await context.sync();
+  return {values:data.values,names};
+}
+function hbColorCompare(actual,expected){
+  return String(actual||"").trim().toUpperCase()===String(expected||"").trim().toUpperCase();
+}
+function hbCigaretteNeedsColor(display){
+  return display.values.some((row,i)=>{
+    const desired=hbCigaretteRowStyle(row);
+    if(!desired)return false;
+    const cell=display.names[i];
+    return !hbColorCompare(cell.format.fill.color,desired.fill)
+      || !hbColorCompare(cell.format.font.color,desired.font);
+  });
+}
 async function hbMarginRulesInstalled(context,sheet){
   const groups=await hbMarginInspectRules(context,sheet);
-  return !hbMarginNeedsMigration(groups);
+  if(hbMarginNeedsMigration(groups))return false;
+  const rokok=await hbReadCigaretteDisplay(context,sheet);
+  return !hbCigaretteNeedsColor(rokok);
 }
 async function hbEnsureMarginRules(context,sheet){
   const groups=await hbMarginInspectRules(context,sheet);
-  let removed=0,added=0;
-  // Only remove rules created by our V5.0 implementation; leave any
-  // pre-existing user-defined conditional formatting untouched.
+  let removed=0,added=0, recolored=0;
   for(const group of groups){
     for(const format of group.custom){
-      if(String(format.custom.rule.formula||"").toUpperCase().includes(HB_MARGIN_OLD_TAG)){
-        format.delete();
-        removed++;
-      }
+      const formula=String(format.custom.rule.formula||"").toUpperCase();
+      const remove=group.g.mode==="cigarette"
+        ? hbMarginIsLegacyCigaretteRule(formula)
+        : formula.includes(HB_MARGIN_OLD_TAG);
+      if(remove){format.delete();removed++;}
     }
   }
   if(removed)await context.sync();
-  for(const x of groups){
-    const existing=x.custom.map(f=>String(f.custom.rule.formula||"").toUpperCase())
-      .filter(f=>!f.includes(HB_MARGIN_OLD_TAG));
+  // Keep dynamic Conditional Formatting for Paket (it is already working).
+  const packageGroup=groups.find(g=>g.g.mode==="packet");
+  if(packageGroup){
+    const existing=packageGroup.custom.map(f=>String(f.custom.rule.formula||"").toUpperCase())
+       .filter(f=>!f.includes(HB_MARGIN_OLD_TAG));
     for(const rule of HB_MARGIN_RULES){
-      const marker=(HB_MARGIN_TAG+"_"+x.g.first+"_"+rule.key).toUpperCase();
+      const marker=(HB_MARGIN_TAG+"_"+packageGroup.g.first+"_"+rule.key).toUpperCase();
       if(existing.some(f=>f.includes(marker)))continue;
-      const cf=x.formats.add(Excel.ConditionalFormatType.custom);
-      cf.custom.rule.formula=hbMarginRuleFormula(x.g,rule);
+      const cf=packageGroup.formats.add(Excel.ConditionalFormatType.custom);
+      cf.custom.rule.formula=hbMarginRuleFormula(packageGroup.g,rule);
       cf.custom.format.fill.color=rule.fill;
       cf.custom.format.font.color=rule.font;
       cf.stopIfTrue=true;
@@ -130,7 +181,28 @@ async function hbEnsureMarginRules(context,sheet){
     }
   }
   if(added)await context.sync();
-  return added;
+
+  // Cigarette template has BLACK base fill even when there is NO loss.
+  // Explicitly replace its base fill and font using E, not C-B.
+  const rokok=await hbReadCigaretteDisplay(context,sheet);
+  for(let i=0;i<rokok.values.length;i++){
+    const style=hbCigaretteRowStyle(rokok.values[i]);
+    if(!style)continue; // Leave separators/headings and blank products unchanged.
+    const nameCell=rokok.names[i];
+    if(!hbColorCompare(nameCell.format.fill.color,style.fill) ||
+       !hbColorCompare(nameCell.format.font.color,style.font)){
+      nameCell.format.fill.color=style.fill;
+      nameCell.format.font.color=style.font;
+      recolored++;
+    }
+  }
+  if(recolored)await context.sync();
+
+  const verified=await hbReadCigaretteDisplay(context,sheet);
+  if(hbCigaretteNeedsColor(verified)){
+    throw new Error('Warna Rokok masih berbeda dari nilai margin kolom E setelah penyimpanan.');
+  }
+  return added+recolored+removed;
 }
 
 async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
@@ -243,8 +315,8 @@ async function hbMarginReconcileAll(manual=false){
     if(failures.length)throw new Error(failures.slice(0,2).join("; "));
     hbMarginFailures=0;
     hbMarginStatus("BERHASIL — "+completed+" sheet diperiksa; "+
-      created+" aturan warna baru dipasang. "+skipped+" sheet aktif/admin dilewati. "+
-      "Warna nama barang akan mengikuti margin otomatis. Versi "+HB_MARGIN_BUILD+".");
+      created+" pembaruan aturan/warna. "+skipped+" sheet admin dilewati. "+
+      "Warna dasar Rokok diverifikasi langsung dari margin E, aturan paket tetap dinamis. Versi "+HB_MARGIN_BUILD+".");
   }catch(e){
     hbMarginFailures++;
     hbMarginStatus("BELUM SELESAI — "+(e&&e.message||String(e))+
