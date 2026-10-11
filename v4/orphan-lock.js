@@ -12,9 +12,27 @@ const ORPHAN_ADMIN_UNTIL_KEY = "hitunganV4.adminUnlockUntil";
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
-  setTimeout(() => lockOrphanUnprotectedSheets().catch(reportOrphanError), 1800);
+  // A cell can still be in Excel edit mode when the pane opens.
+  // Keep retries pending; do not mark a failed lock as successful.
+  scheduleOrphanRetry(1800);
+  document.addEventListener("focusin", () => scheduleOrphanRetry(1200));
+  window.addEventListener("focus", () => scheduleOrphanRetry(1200));
+  setInterval(() => scheduleOrphanRetry(0), 30000);
 });
 
+let orphanRetryTimer=null;
+let orphanBusy=false;
+function scheduleOrphanRetry(delay){
+  if(orphanRetryTimer)clearTimeout(orphanRetryTimer);
+  orphanRetryTimer=setTimeout(async()=>{
+    orphanRetryTimer=null;
+    if(orphanBusy)return;
+    orphanBusy=true;
+    try{await lockOrphanUnprotectedSheets();}
+    catch(e){reportOrphanError(e);}
+    finally{orphanBusy=false;}
+  },delay);
+}
 async function lockOrphanUnprotectedSheets() {
   if (typeof getSetting !== "function" || typeof requireSecret !== "function" || typeof fullLock !== "function") return;
 
@@ -71,5 +89,5 @@ async function lockOrphanUnprotectedSheets() {
 function reportOrphanError(e) {
   if (typeof setSecurityStatus !== "function") return;
   const text = e && e.message ? e.message : String(e || "gagal");
-  setSecurityStatus(`FAIL-SAFE belum berhasil mengunci sheet terbuka: ${text}`, true);
+  setSecurityStatus(`Penguncian tertunda: ${text}. Tekan ENTER atau ESC untuk keluar dari edit sel, lalu sistem mencoba lagi.`, true);
 }
