@@ -222,8 +222,8 @@ async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
   for(const {item,cell} of sell){
     const sellPrice=numericSellingPrice(cell.values[0][0]);
     if(Number.isFinite(sellPrice)&&sellPrice-item.cost<MIN_MARGIN_RUPIAH){
-      cell.format.fill.color=LOW_MARGIN_FILL;
-      cell.format.font.color=LOW_MARGIN_FONT;
+      // Alert is informational; visual category now belongs exclusively to
+      // conditional formatting on the product NAME (column A).
       alerts.push(item.group+" baris "+item.row+": margin "+(sellPrice-item.cost));
     }
   }
