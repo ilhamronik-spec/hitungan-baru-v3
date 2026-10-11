@@ -5,7 +5,7 @@ const CFG = { enabled:"hitunganV4.enabled", pinHash:"hitunganV4.pinHash", secret
 const LEGACY_V3_SECRET_KEY = "hitunganV3.secret";
 const WORK_AREA = "A1:AH400";
 const LOCK_RANGES = [
-  "B267","B269","B271:B275","G272:G275","F178:F238","K178:K238","L178:L238","M178:M238","N178:N238","O178:O238",
+  "B267","B269","B271:B275","G272:G275","C178:C238","F178:F238","K178:K238","L178:L238","M178:M238","N178:N238","O178:O238",
   "N163","B6:B75","C6:C75","D6:D75","F6:F75","G6:G75","H6:H75","M23","L50","K75","L75","H76:H79","B114:B116",
   "B145:B147","B163:B165","J168:J170","F171:F173","R249:R251","K145:K147","W143:W145","W157:W159","W129:W131","Y178","Y237"
 ];
@@ -50,6 +50,7 @@ function installWrappers(){
         if(typeof applyNextShiftPricing==="function"){
           pricingResult=await applyNextShiftPricing(c,newest,sourceName,purchaseData);
         }
+        newest.calculate(true);
         if(isGlobalUnlockMode()){
           // Mode admin persisten: sheet lama dan baru harus tetap terbuka.
           if(!wb.protection.protected) wb.protection.protect(pw);
