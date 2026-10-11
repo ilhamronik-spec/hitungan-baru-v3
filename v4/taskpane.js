@@ -273,7 +273,37 @@ async function adminWorkingLock(){try{await checkPin();assertGlobalUnlockOff();c
 async function adminFullLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);fullLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminUnlockStructure(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(wb.protection.protected)wb.protection.unprotect(pw);await c.sync();});if(relockTimer)clearTimeout(relockTimer);relockTimer=setTimeout(()=>enforceStructure().catch(()=>{}),120000);setSecurityStatus("ADMIN: struktur terbuka maksimal 2 menit. Delete/Rename aktif.",false);}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminLockStructure(){try{await checkPin();if(relockTimer)clearTimeout(relockTimer);relockTimer=null;await enforceStructure();setSecurityStatus("Struktur workbook dikunci kembali.",false);}catch(e){setSecurityStatus(errText(e),true);}}
-async function adminSync(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook,sheets=wb.worksheets,active=sheets.getActiveWorksheet();wb.protection.load("protected");sheets.load("items/id,items/name,items/protection/protected");active.load("id,name");await c.sync();if(wb.protection.protected)wb.protection.unprotect(pw);for(const sh of sheets.items){if(sh.protection.protected)sh.protection.unprotect(pw);if(sh.id===active.id)workingLock(sh,pw);else fullLock(sh,pw);}wb.protection.protect(pw);await c.sync();setSecurityStatus(`Sinkron selesai. "${active.name}"=kerja; lainnya=full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+async function adminSync(){
+  try{
+    await checkPin();assertGlobalUnlockOff();
+    const pw=requireSecret();
+    const shiftId=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+    const shiftUntil=Number(getSetting("hitunganV4.shiftWorkUntil"));
+    const shiftValid=Boolean(shiftId&&Number.isFinite(shiftUntil)&&Date.now()<shiftUntil);
+    const current=await Excel.run(async c=>{
+      const wb=c.workbook,sheets=wb.worksheets;
+      wb.protection.load("protected");
+      sheets.load("items/id,items/name,items/protection/protected");
+      await c.sync();
+      if(wb.protection.protected)wb.protection.unprotect(pw);
+      let workName="";
+      for(const sh of sheets.items){
+        if(sh.protection.protected)sh.protection.unprotect(pw);
+        if(shiftValid&&String(sh.id)===shiftId){
+          workingLock(sh,pw);workName=sh.name;
+        }else{
+          fullLock(sh,pw);
+        }
+      }
+      wb.protection.protect(pw);
+      await c.sync();
+      return workName;
+    });
+    setSecurityStatus(current?
+      "Sinkron selesai: '"+current+"' tetap sheet kerja karena 2,5 jam belum habis. Lainnya full lock.":
+      "Sinkron selesai: tidak ada shift aktif; seluruh sheet full lock.",false);
+  }catch(e){setSecurityStatus(errText(e),true);}
+}
 
 async function adminUnlockAllSheets(){
   try{
