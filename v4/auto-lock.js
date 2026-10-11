@@ -1,7 +1,7 @@
 "use strict";
 
 // V4 safety rules:
-// 1) Sheet baru berstatus sheet kerja maksimal 2 jam sejak selesai dibuat.
+// 1) Sheet baru berstatus sheet kerja maksimal 2,5 jam sejak selesai dibuat.
 // 2) Karyawan boleh menutup shift lebih cepat tanpa PIN; hasilnya full lock.
 // 3) Setelah full lock, hanya aksi Admin/PIN yang dapat menjadikannya sheet kerja lagi.
 // 4) Admin -> Buka Sheet Aktif tetap punya safety-net 15 menit.
@@ -11,7 +11,7 @@ const ADMIN_UNLOCK_SHEET_ID_KEY = "hitunganV4.adminUnlockSheetId";
 const ADMIN_UNLOCK_SHEET_NAME_KEY = "hitunganV4.adminUnlockSheetName";
 const ADMIN_UNLOCK_UNTIL_KEY = "hitunganV4.adminUnlockUntil";
 
-const SHIFT_WORK_WINDOW_MS = 2 * 60 * 60 * 1000;
+const SHIFT_WORK_WINDOW_MS = 2.5 * 60 * 60 * 1000;
 const GLOBAL_UNLOCK_WINDOW_MS = 90 * 60 * 1000;
 const GLOBAL_UNLOCK_UNTIL_KEY = "hitunganV4.globalUnlockUntil";
 let globalUnlockRelockTimer = null;
@@ -112,14 +112,14 @@ function waitAndWrapShiftCreate() {
 
       if (typeof createNewDaySheet !== "function" || typeof requireSecret !== "function") return;
 
-      // Tunggu wrapper Tambah Display selesai agar pencatatan 2 jam menjadi
+      // Tunggu wrapper Tambah Display selesai agar pencatatan 2,5 jam menjadi
       // lapisan terluar dan baru dimulai setelah seluruh proses pembuatan sheet selesai.
       if (typeof displayTransferWrapped !== "undefined" && !displayTransferWrapped && attempts < 80) return;
 
       const previousCreate = createNewDaySheet;
       createNewDaySheet = async function(person, sheetName, purchaseData) {
         const result = await previousCreate(person, sheetName, purchaseData);
-        await registerNewShiftWorkWindow(sheetName);
+        if(!getSetting(SHIFT_SHEET_ID_KEY) || String(getSetting(SHIFT_SHEET_NAME_KEY))!==String(sheetName)) await registerNewShiftWorkWindow(sheetName);
         return result;
       };
 
@@ -144,6 +144,9 @@ async function registerNewShiftWorkWindow(expectedSheetName) {
     throw new Error(`Sheet baru seharusnya "${expectedSheetName}", tetapi sheet aktif sekarang "${info.name}".`);
   }
 
+  const existingId=getSetting(SHIFT_SHEET_ID_KEY);
+  const existingUntil=Number(getSetting(SHIFT_UNTIL_KEY));
+  if(String(existingId)===String(info.id) && existingUntil>Date.now())return;
   const createdAt = Date.now();
   const until = createdAt + SHIFT_WORK_WINDOW_MS;
 
@@ -155,7 +158,7 @@ async function registerNewShiftWorkWindow(expectedSheetName) {
 
   scheduleShiftWorkRelock(until);
   await refreshShiftUi();
-  setSecurityStatus(`SHIFT AKTIF — sheet "${info.name}" dapat diisi maksimal 2 jam. Setelah itu otomatis full lock.`, false);
+  setSecurityStatus(`SHIFT AKTIF — sheet "${info.name}" dapat diisi maksimal 2,5 jam. Setelah itu otomatis full lock.`, false);
 }
 
 async function restoreShiftWorkWindow() {
@@ -163,6 +166,11 @@ async function restoreShiftWorkWindow() {
   const untilRaw = getSetting(SHIFT_UNTIL_KEY);
 
   if (!sheetId || !untilRaw) {
+    // An earlier version may have created a working sheet without a timer.
+    // Fail closed rather than silently leave that sheet editable indefinitely.
+    if(!persistentAdminUnlockActive() && typeof maskExistingClosedSheets==="function"){
+      await maskExistingClosedSheets();
+    }
     await refreshShiftUi();
     return;
   }
@@ -221,10 +229,10 @@ async function expireShiftWorkWindow() {
 
     await clearShiftWorkWindowState();
     await refreshShiftUi();
-    setSecurityStatus(`BATAS WAKTU SELESAI — sheet "${result}" otomatis FULL LOCK setelah 2 jam. Hanya admin/PIN yang dapat menjadikannya sheet kerja lagi.`, false);
+    setSecurityStatus(`BATAS WAKTU SELESAI — sheet "${result}" otomatis FULL LOCK setelah 2,5 jam. Hanya admin/PIN yang dapat menjadikannya sheet kerja lagi.`, false);
   } catch (e) {
     // Pertahankan state agar V4 mencoba lagi saat panel dibuka berikutnya.
-    setSecurityStatus(`AUTO-LOCK 2 jam belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
+    setSecurityStatus(`AUTO-LOCK 2,5 jam belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
   }
 }
 
@@ -289,7 +297,7 @@ async function refreshShiftUi() {
   }
 
   if (!sheetId || !Number.isFinite(until)) {
-    el.textContent = "Tidak ada shift dalam masa pengisian 2 jam.";
+    el.textContent = "Tidak ada shift dalam masa pengisian 2,5 jam.";
     btn.disabled = true;
     return;
   }
@@ -419,7 +427,7 @@ async function relockPendingAdminSheet() {
     });
 
     await clearAdminSheetAutoLockState();
-    const mode = shouldReturnToWorking ? "sheet kerja (masih dalam 2 jam)" : "full lock";
+    const mode = shouldReturnToWorking ? "sheet kerja (masih dalam 2,5 jam)" : "full lock";
     setSecurityStatus(`AUTO-LOCK ADMIN: sheet "${result}" dikunci kembali sebagai ${mode}.`, false);
   } catch (e) {
     setSecurityStatus(`AUTO-LOCK admin belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
@@ -482,7 +490,7 @@ async function expireGlobalUnlockWindow() {
   const until = Number(getSetting(GLOBAL_UNLOCK_UNTIL_KEY));
   if (Number.isFinite(until) && until > Date.now()) return scheduleGlobalUnlockRelock(until);
   if (typeof lockAllSheetsCore !== "function") throw new Error("Mesin penguncian belum siap.");
-  await lockAllSheetsCore("WAKTU ADMIN HABIS — 1,5 jam berlalu. Sheet kerja yang masih dalam 2 jam tetap bisa diisi.");
+  await lockAllSheetsCore("WAKTU ADMIN HABIS — 1,5 jam berlalu. Sheet kerja yang masih dalam 2,5 jam tetap bisa diisi.");
 }
 async function clearGlobalUnlockWindowState() {
   if (globalUnlockRelockTimer) clearTimeout(globalUnlockRelockTimer);
