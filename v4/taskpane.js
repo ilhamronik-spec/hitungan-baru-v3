@@ -51,6 +51,8 @@ function installWrappers(){
           pricingResult=await applyNextShiftPricing(c,newest,sourceName,purchaseData);
         }
         newest.calculate(true);
+        // New sheets receive dynamic margin colors before their protection is restored.
+        if(typeof hbEnsureMarginRules==="function")await hbEnsureMarginRules(c,newest);
         if(isGlobalUnlockMode()){
           // Mode admin persisten: sheet lama dan baru harus tetap terbuka.
           if(!wb.protection.protected) wb.protection.protect(pw);
