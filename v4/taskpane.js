@@ -124,7 +124,8 @@ function startSecurityUi(){
         }else{
           setGlobalUnlockUi(false);
           await enforceStructure();
-          setSecurityStatus("AMAN — struktur workbook terkunci.",false);
+          await maskExistingClosedSheets();
+          setSecurityStatus("AMAN — struktur workbook terkunci; angka mines pada sheet lama disembunyikan.",false);
         }
       }catch(e){setSecurityStatus(errText(e),true);}
     }
@@ -166,6 +167,30 @@ function fullLock(sh,pw){
   maskMinusCells(sh);
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.none,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
+// Reconcile older worksheets already locked before the masking feature existed.
+// Never clear or replace source values/formulas; only apply display formatting.
+async function maskExistingClosedSheets(){
+  if(isGlobalUnlockMode())return;
+  const pw=requireSecret();
+  const shiftId=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+  const shiftUntil=Number(getSetting("hitunganV4.shiftWorkUntil"));
+  const shiftActive=Boolean(shiftId && Number.isFinite(shiftUntil) && Date.now()<shiftUntil);
+  await Excel.run(async c=>{
+    const sheets=c.workbook.worksheets;
+    sheets.load("items/id,items/name,items/protection/protected");
+    await c.sync();
+    for(const sh of sheets.items){
+      if(shiftActive && String(sh.id)===shiftId)continue;
+      // Do not change an intentionally unlocked admin correction sheet.
+      if(!sh.protection.protected)continue;
+      sh.protection.unprotect(pw);
+      maskMinusCells(sh);
+      fullLock(sh,pw);
+    }
+    await c.sync();
+  });
+}
+
 async function enforceStructure(){const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(!wb.protection.protected){wb.protection.protect(pw);await c.sync();}});}
 async function checkPin(){const p=by("adminPin").value;if(!p)throw new Error("Masukkan PIN admin.");if(await sha256(p)!==getSetting(CFG.pinHash))throw new Error("PIN admin salah.");by("adminPin").value="";}
 async function adminUnlockSheet(){try{await checkPin();if(isGlobalUnlockMode())return setSecurityStatus("Semua sheet sudah terbuka dalam mode ADMIN BEBAS.",false);const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);await c.sync();setSecurityStatus(`ADMIN: sheet "${sh.name}" dibuka.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
