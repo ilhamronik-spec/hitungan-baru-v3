@@ -385,3 +385,21 @@ button:disabled {
   color: #6b7280;
   cursor: not-allowed;
 }
+
+
+/* V4.9: role separation, admin-only deferred selling prices. */
+[hidden] { display:none !important; }
+.role-entry { display:grid; gap:12px; padding-top:18px; }
+.role-entry h2 { margin:0 0 4px; font-size:16px; }
+.role-card { margin:0; text-align:left; display:flex; flex-direction:column; gap:6px; border:1px solid #cbd5e1; border-radius:10px; padding:16px; background:#f8fafc; color:#153b2c; min-height:94px; cursor:pointer; }
+.role-card strong { font-size:15px; letter-spacing:.02em; }
+.role-card span { font-size:12px; line-height:1.45; color:#64748b; font-weight:400; }
+.role-card:hover { background:#e8f5ee; border-color:#107c41; }
+#adminWorkspace, #employeeWorkspace { margin-top:16px; }
+#adminWorkspace > .secondary-button, #employeeWorkspace > .secondary-button { width:100%; margin-bottom:14px; }
+#sellingPriceAdmin { display:grid; gap:6px; }
+#sellingPriceAdmin input, #sellingPriceAdmin select { max-width:100%; width:100%; }
+#sellingPriceRows { max-height:360px; overflow:auto; border:1px solid #e2e8f0; border-radius:7px; }
+.selling-edit-row { display:flex; flex-direction:column; gap:5px; }
+.selling-edit-row .selling-save { margin:0; }
+#adminGateStatus { color:#b42318; }
