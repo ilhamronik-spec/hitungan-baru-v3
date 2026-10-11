@@ -103,6 +103,31 @@ async function hbEnsureMarginRules(context,sheet){
   return added;
 }
 
+
+async function hbMarginRulesInstalled(context,sheet){
+  // Read before touching protection: restarting the pane must not repeatedly
+  // unprotect and re-protect 16+ historical sheets unnecessarily.
+  const groups=HB_MARGIN_GROUPS.map(g=>{
+    const formats=sheet.getRange("A"+g.first+":A"+g.last).conditionalFormats;
+    formats.load("type");
+    return {first:g.first,formats};
+  });
+  await context.sync();
+  for(const g of groups){
+    g.custom=g.formats.items.filter(x=>x.type===Excel.ConditionalFormatType.custom||x.type==="Custom");
+    g.custom.forEach(x=>x.custom.load("rule"));
+  }
+  await context.sync();
+  for(const g of groups){
+    const formulas=g.custom.map(f=>String(f.custom.rule.formula||"").toUpperCase());
+    for(const rule of HB_MARGIN_RULES){
+      const token=(HB_MARGIN_TAG+"_"+g.first+"_"+rule.key).toUpperCase();
+      if(!formulas.some(f=>f.includes(token)))return false;
+    }
+  }
+  return true;
+}
+
 async function hbMarginApplyToSheet(entry){
   return Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(entry.name);
@@ -112,6 +137,7 @@ async function hbMarginApplyToSheet(entry){
     if(isGlobalUnlockMode())return 0;
     const excluded=hbMarginExcludedSheetIds();
     if(excluded.has(String(sh.id)))return 0;
+    if(await hbMarginRulesInstalled(ctx,sh))return 0;
     const originallyProtected=Boolean(sh.protection.protected);
     const secretPw=requireSecret();
     if(originallyProtected){
@@ -122,6 +148,8 @@ async function hbMarginApplyToSheet(entry){
     try{
       added=await hbEnsureMarginRules(ctx,sh);
     }finally{
+      // If admin just opened all sheets, do not re-lock against the admin mode.
+      if(isGlobalUnlockMode())return added;
       // Restore the protection mode; never leave a historical sheet editable
       // even if conditional formatting fails.
       if(originallyProtected){
