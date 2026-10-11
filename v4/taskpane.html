@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hitungan Baru Aman V4</title>
-    <link rel="stylesheet" href="./taskpane.css?v=5.0.0" />
+    <link rel="stylesheet" href="./taskpane.css?v=5.4.0" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <script src="./taskpane.js?v=5.1.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
@@ -13,7 +13,7 @@
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
     <script src="./mines-mask-recovery.js?v=2" defer></script>
-    <script src="./deferred-pricing.js?v=1.3.0" defer></script>
+    <script src="./deferred-pricing.js?v=5.4.0" defer></script>
     <script src="./margin-colors.js?v=1.2.0" defer></script>
   </head>
   <body>
@@ -21,7 +21,7 @@
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 5.3</h1>
+          <h1>Hitungan Baru Aman V4 · 5.4</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -97,7 +97,7 @@
 
       <section id="sellingPriceAdmin" class="security-card">
         <h2>Kelola Harga Jual — Berlaku Shift Berikutnya</h2>
-        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru berlaku saat sheet berikutnya dibuat. Paket: harga jual kolom C. Rokok: harga jual kolom B. Daftar mengikuti urutan barang di sheet asli dan menampilkan operator beserta jenis paket (contoh: AXIS - 1.5 GB/1H).</p>
+        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru berlaku saat sheet berikutnya dibuat. Paket: harga jual kolom C. Rokok: harga jual kolom B. Setiap nama barang ditampilkan lengkap seperti Menu Belanja: AXIS - 1.5 GB/1H, IM3 - 5/2h, dan sebagainya. Nama/baris Excel tidak berubah.</p>
         <label for="sellingSourceSheet">Sheet sumber</label>
         <select id="sellingSourceSheet"></select>
         <label for="sellingCategory">Kategori</label>
@@ -109,7 +109,8 @@
         <input id="sellingPriceSearch" type="search" placeholder="Cari nama paket atau rokok" autocomplete="off" />
         <button id="refreshSellingPrices" class="secondary-button" type="button">Muat Daftar Harga</button>
         <p id="sellingPriceStatus" class="security-note" aria-live="polite">Pilih sheet sumber untuk menjadwalkan perubahan harga.</p>
-        <div id="sellingPriceRows" class="product-list" aria-label="Daftar harga"></div>
+        <p id="sellingPriceBuild" class="security-note selling-price-build" aria-live="polite">FORMAT NAMA LENGKAP · v5.4.0 — memuat daftar...</p>
+        <div id="sellingPriceRows" class="product-list" aria-label="Daftar harga lengkap per operator"></div>
       </section>
 
       <section class="security-card" id="marginColorsPanel" aria-label="Warna margin barang">
