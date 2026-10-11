@@ -3,11 +3,12 @@
 // V5 — Margins are evaluated on every worksheet from that worksheet's own
 // B (harga dasar) and C (harga jual). Color is applied only to item names in A.
 // Conditional formatting is dynamic and persists when Excel recalculates.
-const HB_MARGIN_BUILD = "5.0.0";
-const HB_MARGIN_TAG = "HB_MARGIN_V50";
+const HB_MARGIN_BUILD = "5.1.0";
+const HB_MARGIN_TAG = "HB_MARGIN_V51";
+const HB_MARGIN_OLD_TAG = "HB_MARGIN_V50";
 const HB_MARGIN_GROUPS = [
-  { name:"Paket", first:6, last:75 },
-  { name:"Rokok", first:178, last:238 }
+  { name:"Paket", first:6, last:75, mode:"packet" },
+  { name:"Rokok", first:178, last:238, mode:"cigarette" }
 ];
 const HB_MARGIN_RULES = [
   {key:"NEGATIVE", test:"d<0", fill:"#000000", font:"#FFFFFF", name:"Minus"},
@@ -34,10 +35,15 @@ function hbMarginBand(margin) {
 
 // Formula uses an explicit marker through N("text") so that duplicated rules
 // can be recognized without deleting pre-existing workbook formatting.
-function hbMarginRuleFormula(first, rule) {
-  const diff="$C"+first+"-$B"+first;
-  const guard='AND($A'+first+'<>"",ISNUMBER($B'+first+'),ISNUMBER($C'+first+'),$B'+first+'>0)';
-  const test=rule.test.replace(/\bd\b/g,diff);
+function hbMarginRuleFormula(group, rule) {
+  const first=group.first;
+  // Paket: cost B, selling C. Rokok: native margin is already calculated in E.
+  // Never compute C-B on cigarette rows: it reverses their margin sign.
+  const d=group.mode==="cigarette"?"$E"+first:"($C"+first+"-$B"+first+")";
+  const guard=group.mode==="cigarette"
+    ? 'AND($A'+first+'<>"",ISNUMBER($B'+first+'),ISNUMBER($C'+first+'),ISNUMBER($E'+first+'),$B'+first+'>0,$C'+first+'>0)'
+    : 'AND($A'+first+'<>"",ISNUMBER($B'+first+'),ISNUMBER($C'+first+'),$B'+first+'>0,$C'+first+'>0)';
+  const test=rule.test.replace(/\bd\b/g,d);
   const tag=HB_MARGIN_TAG+"_"+first+"_"+rule.key;
   return "=AND("+guard+","+test+',N("'+tag+'")=0)';
 }
@@ -69,30 +75,54 @@ function hbMarginExcludedSheetIds(){
   return excluded;
 }
 
-async function hbEnsureMarginRules(context,sheet){
-  // No destructive clearAll(): preserve rules the user already has.
-  const descriptors=[];
-  for(const g of HB_MARGIN_GROUPS){
-    const range=sheet.getRange("A"+g.first+":A"+g.last);
-    const formats=range.conditionalFormats;
+async function hbMarginInspectRules(context,sheet){
+  const groups=HB_MARGIN_GROUPS.map(g=>{
+    const formats=sheet.getRange("A"+g.first+":A"+g.last).conditionalFormats;
     formats.load("type");
-    descriptors.push({g,range,formats});
+    return {g,formats};
+  });
+  await context.sync();
+  for(const group of groups){
+    group.custom=group.formats.items.filter(f=>f.type===Excel.ConditionalFormatType.custom || f.type==="Custom");
+    group.custom.forEach(f=>f.custom.load("rule"));
   }
   await context.sync();
-  for(const x of descriptors){
-    x.custom=x.formats.items.filter(format=>format.type===Excel.ConditionalFormatType.custom||format.type==="Custom");
-    x.custom.forEach(format=>format.custom.load("rule"));
-  }
-  await context.sync();
+  return groups;
+}
 
-  let added=0;
-  for(const x of descriptors){
-    const formulas=x.custom.map(format=>String(format.custom.rule.formula||"").toUpperCase());
+function hbMarginNeedsMigration(groups){
+  return groups.some(({g,custom})=>{
+    const formulas=custom.map(f=>String(f.custom.rule.formula||"").toUpperCase());
+    if(formulas.some(f=>f.includes(HB_MARGIN_OLD_TAG)))return true;
+    return HB_MARGIN_RULES.some(rule=>!formulas.some(f=>f.includes((HB_MARGIN_TAG+"_"+g.first+"_"+rule.key).toUpperCase())));
+  });
+}
+async function hbMarginRulesInstalled(context,sheet){
+  const groups=await hbMarginInspectRules(context,sheet);
+  return !hbMarginNeedsMigration(groups);
+}
+async function hbEnsureMarginRules(context,sheet){
+  const groups=await hbMarginInspectRules(context,sheet);
+  let removed=0,added=0;
+  // Only remove rules created by our V5.0 implementation; leave any
+  // pre-existing user-defined conditional formatting untouched.
+  for(const group of groups){
+    for(const format of group.custom){
+      if(String(format.custom.rule.formula||"").toUpperCase().includes(HB_MARGIN_OLD_TAG)){
+        format.delete();
+        removed++;
+      }
+    }
+  }
+  if(removed)await context.sync();
+  for(const x of groups){
+    const existing=x.custom.map(f=>String(f.custom.rule.formula||"").toUpperCase())
+      .filter(f=>!f.includes(HB_MARGIN_OLD_TAG));
     for(const rule of HB_MARGIN_RULES){
       const marker=(HB_MARGIN_TAG+"_"+x.g.first+"_"+rule.key).toUpperCase();
-      if(formulas.some(s=>s.includes(marker)))continue;
-      const cf=x.range.conditionalFormats.add(Excel.ConditionalFormatType.custom);
-      cf.custom.rule.formula=hbMarginRuleFormula(x.g.first,rule);
+      if(existing.some(f=>f.includes(marker)))continue;
+      const cf=x.formats.add(Excel.ConditionalFormatType.custom);
+      cf.custom.rule.formula=hbMarginRuleFormula(x.g,rule);
       cf.custom.format.fill.color=rule.fill;
       cf.custom.format.font.color=rule.font;
       cf.stopIfTrue=true;
@@ -101,31 +131,6 @@ async function hbEnsureMarginRules(context,sheet){
   }
   if(added)await context.sync();
   return added;
-}
-
-
-async function hbMarginRulesInstalled(context,sheet){
-  // Read before touching protection: restarting the pane must not repeatedly
-  // unprotect and re-protect 16+ historical sheets unnecessarily.
-  const groups=HB_MARGIN_GROUPS.map(g=>{
-    const formats=sheet.getRange("A"+g.first+":A"+g.last).conditionalFormats;
-    formats.load("type");
-    return {first:g.first,formats};
-  });
-  await context.sync();
-  for(const g of groups){
-    g.custom=g.formats.items.filter(x=>x.type===Excel.ConditionalFormatType.custom||x.type==="Custom");
-    g.custom.forEach(x=>x.custom.load("rule"));
-  }
-  await context.sync();
-  for(const g of groups){
-    const formulas=g.custom.map(f=>String(f.custom.rule.formula||"").toUpperCase());
-    for(const rule of HB_MARGIN_RULES){
-      const token=(HB_MARGIN_TAG+"_"+g.first+"_"+rule.key).toUpperCase();
-      if(!formulas.some(f=>f.includes(token)))return false;
-    }
-  }
-  return true;
 }
 
 async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
