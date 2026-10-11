@@ -51,8 +51,6 @@ function installWrappers(){
           pricingResult=await applyNextShiftPricing(c,newest,sourceName,purchaseData);
         }
         newest.calculate(true);
-        // New sheets receive dynamic margin colors before their protection is restored.
-        if(typeof hbEnsureMarginRules==="function")await hbEnsureMarginRules(c,newest);
         if(isGlobalUnlockMode()){
           // Mode admin persisten: sheet lama dan baru harus tetap terbuka.
           if(!wb.protection.protected) wb.protection.protect(pw);
@@ -67,10 +65,22 @@ function installWrappers(){
       if(typeof registerNewShiftWorkWindow==="function"){
         await registerNewShiftWorkWindow(sheetName);
       }
+      // Visual formatting must never turn successful sheet creation into
+      // "creation failed". Apply afterwards and offer repair on any error.
+      let marginColorWarning="";
+      if(typeof hbMarginInstallNewSheet==="function"){
+        try { await hbMarginInstallNewSheet(sheetName); }
+        catch(e) {
+          marginColorWarning=errText(e);
+          if(typeof hbMarginQueueRetry==="function")hbMarginQueueRetry(12000);
+        }
+      }
       if(pricingResult.applied.length && typeof consumeEffectivePrices==="function"){
         await consumeEffectivePrices(pricingResult.applied);
       }
-      if(pricingResult.skipped.length){
+      if(marginColorWarning){
+        setSecurityStatus("Sheet baru berhasil dibuat, tetapi warna margin belum diterapkan: "+marginColorWarning+". Periksa ulang melalui Menu Admin.",true);
+      }else if(pricingResult.skipped.length){
         setSecurityStatus("PERINGATAN HARGA: "+pricingResult.skipped.join(", ")+" belum diterapkan; harga pending tetap tersimpan.",true);
       }else if(pricingResult.alerts.length){
         setSecurityStatus("PERINGATAN MARGIN < Rp1.000: "+pricingResult.alerts.join("; "),true);
