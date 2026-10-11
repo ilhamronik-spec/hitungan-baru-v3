@@ -54,6 +54,11 @@ function installWrappers(){
         }
         await c.sync();
       });
+      // Register the shift in the primary creation pipeline, rather than relying
+      // on a later optional wrapper that might not be installed yet.
+      if(typeof registerNewShiftWorkWindow==="function"){
+        await registerNewShiftWorkWindow(sheetName);
+      }
       setSecurityStatus(
         isGlobalUnlockMode()
           ? "ADMIN BEBAS — hari baru selesai dan semua sheet tetap terbuka sampai dikunci kembali."
@@ -160,7 +165,14 @@ function workingLock(sh,pw){
 }
 const MINES_CELLS = ["D275","D276","G275","J274"];
 function maskMinusCells(sh){
-  for(const address of MINES_CELLS) sh.getRange(address).numberFormat = [[";;;"]];
+  for(const address of MINES_CELLS){
+    const r=sh.getRange(address);
+    r.numberFormat=[[";;;"]];
+    r.format.fill.color="#000000";
+    r.format.font.color="#000000";
+    r.format.protection.locked=true;
+    r.format.protection.formulaHidden=true;
+  }
 }
 function fullLock(sh,pw){
   const w=sh.getRange(WORK_AREA); w.format.protection.locked=true; w.format.protection.formulaHidden=true;
