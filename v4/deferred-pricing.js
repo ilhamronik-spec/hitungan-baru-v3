@@ -69,19 +69,19 @@ async function loadSellingPriceRows(){
   if(!sellingEditorSheet||!g)return;
   const rows=await Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(sellingEditorSheet);
-    // Use the exact row order and product filtering of the employee shopping menu.
-    // Paket: B=harga dasar, C=harga jual. Rokok: B=harga jual, C=harga dasar.
-    const range=sh.getRange("A"+(g.start-1)+":C"+g.end);
+    // Exact row order of the Belanja editor; never renumber or sort products.
+    const from=g.label==="Paket"?g.start-1:g.start;
+    const range=sh.getRange("A"+from+":C"+g.end);
     range.load("values");
     await ctx.sync();
-    return range.values.map((values,i)=>{
-      const row=g.start-1+i;
-      const name=String(values[0]??"").trim();
-      const oldPrice=numericSellingPrice(values[g.sellColumn==="B"?1:2]);
-      const oldCost=numericSellingPrice(values[g.costColumn==="B"?1:2]);
-      const isProduct=Boolean(name&&Number.isFinite(oldCost)&&oldCost>0);
-      return {row,name,oldPrice,oldCost,isProduct,kind:isProduct?"product":"heading"};
-    }).filter(item=>item.name && (item.isProduct||item.row>=g.start));
+    return range.values.map((v,i)=>{
+      const row=from+i;
+      const name=String(v[0]??"").trim();
+      const oldPrice=numericSellingPrice(v[g.sellColumn==="B"?1:2]);
+      const oldCost=numericSellingPrice(v[g.costColumn==="B"?1:2]);
+      const isProduct=Boolean(row>=g.start && name && Number.isFinite(oldCost) && oldCost>0);
+      return {row,name,oldPrice,oldCost,isProduct};
+    }).filter(r=>r.name);
   });
   sellingEditorRows=rows;
   renderSellingPriceRows();
@@ -93,84 +93,89 @@ function renderSellingPriceRows(){
   container.replaceChildren();
   const q=String(document.getElementById("sellingPriceSearch")?.value||"").toLowerCase().trim();
   const pending=sellingPriceQueue();
-  const matches=sellingEditorRows.filter(x=>x.isProduct && x.name.toLowerCase().includes(q));
-  // Preserve original spreadsheet order; section headings follow the Belanja menu.
-  let lastSection="";
-  for(const entry of sellingEditorRows){
-    if(!entry.isProduct && entry.name && entry.row<=(matches.at(-1)?.row??-1)){
-      const segment=matches.some(m=>m.row>entry.row && (sellingEditorRows.findLast(x=>x.row<m.row&&!x.isProduct)?.row??-1)===entry.row);
-      if(segment && (!q||entry.name.toLowerCase().includes(q)||matches.length)){
-        const header=document.createElement("div");
-        header.className="product-summary";
-        header.textContent=entry.name;
-        header.dataset.sectionRow=String(entry.row);
-        container.appendChild(header);
-      }
+  const g=SELLING_PRICE_GROUPS[sellingEditorCategory];
+  const matches=sellingEditorRows.filter(item=>item.isProduct && item.name.toLowerCase().includes(q));
+  // Group headers are the same physical worksheet section rows, never products.
+  const headings=[];
+  if(sellingEditorCategory==="paket"){
+    for(const item of sellingEditorRows){
+      if(!item.isProduct)headings.push(item);
     }
   }
-  // Heading elements are positioned with the corresponding products below.
-  const sectionHeaders=[...container.querySelectorAll("[data-section-row]")];
-  const sections=sectionHeaders.map(h=>({row:Number(h.dataset.sectionRow),node:h}));
-  container.replaceChildren();
-  let currentSection=-1;
+  let previousHeading=-1;
   for(const item of matches){
-    const segment=sections.filter(x=>x.row<item.row).at(-1);
-    if(segment && segment.row!==currentSection){
-      const header=segment.node.cloneNode(true);
-      container.appendChild(header);
-      currentSection=segment.row;
+    const section=headings.filter(h=>h.row<item.row).at(-1);
+    if(section && section.row!==previousHeading){
+      const title=document.createElement("div");
+      title.className="product-summary selling-section-heading";
+      title.textContent=section.name;
+      container.appendChild(title);
+      previousHeading=section.row;
     }
-    const row=document.createElement("div");
+    const row=document.createElement("article");
     row.className="product-row selling-edit-row";
-    const label=document.createElement("label");
+    row.dataset.sheetRow=String(item.row);
+    const label=document.createElement("div");
     label.className="product-name";
-    label.textContent=item.name+" — baris "+item.row;
+    label.textContent=item.name+" · Baris "+item.row;
     const info=document.createElement("div");
     info.className="product-meta";
-    info.textContent="Harga jual ("+SELLING_PRICE_GROUPS[sellingEditorCategory].sellColumn+"): Rp "+(Number.isFinite(item.oldPrice)?item.oldPrice.toLocaleString("id-ID"):"-") + " • Harga dasar ("+SELLING_PRICE_GROUPS[sellingEditorCategory].costColumn+"): Rp "+(Number.isFinite(item.oldCost)?item.oldCost.toLocaleString("id-ID"):"-");
+    const rp=n=>Number.isFinite(n) && n>0 ? n.toLocaleString("id-ID") : "-";
+    info.textContent="Harga jual "+g.sellColumn+": Rp "+rp(item.oldPrice)
+      +" | Harga dasar "+g.costColumn+": Rp "+rp(item.oldCost);
     const input=document.createElement("input");
-    input.type="number"; input.min="0";input.step="1";
-    input.placeholder="Harga jual baru (shift selanjutnya)";
+    input.type="number";
+    input.min="1"; input.step="1";
+    input.placeholder="Harga jual untuk shift berikutnya";
     input.setAttribute("aria-label","Harga baru "+item.name);
-    const found=pending.find(p=>p.source===sellingEditorSheet&&p.group===sellingEditorCategory&&p.row===item.row);
+    const found=pending.find(p=>p.source===sellingEditorSheet && p.group===sellingEditorCategory && p.row===item.row);
     if(found)input.value=String(found.price);
     const save=document.createElement("button");
-    save.type="button";save.className="secondary-button selling-save";
-    save.textContent=found?"Perbarui harga pending":"Jadwalkan harga";
+    save.type="button";
+    save.className="secondary-button selling-save";
+    save.textContent=found?"Perbarui Harga Pending":"Jadwalkan Harga";
     save.addEventListener("click",async ()=>{
       try{
         if(!adminSessionAuthenticated)throw new Error("Masuk sebagai admin terlebih dahulu.");
-        const p=Number(input.value);
-        if(!Number.isInteger(p)||p<=0)throw new Error("Harga harus rupiah bulat positif.");
-        const all=sellingPriceQueue();
+        const price=Number(input.value);
+        if(!Number.isSafeInteger(price)||price<=0)throw new Error("Harga harus berupa rupiah bulat positif.");
         const key=scheduledPriceId(sellingEditorSheet,sellingEditorCategory,item.row);
-        const clean=all.filter(x=>scheduledPriceId(x.source,x.group,x.row)!==key);
-        clean.push({source:sellingEditorSheet,group:sellingEditorCategory,row:item.row,name:item.name,
-          price:p,savedAt:Date.now(),id:key});
+        const clean=sellingPriceQueue().filter(p=>scheduledPriceId(p.source,p.group,p.row)!==key);
+        clean.push({source:sellingEditorSheet,group:sellingEditorCategory,row:item.row,
+          name:item.name,price,savedAt:Date.now(),id:key});
         setSetting(PRICE_PENDING_KEY,clean);
         await saveSettings();
-        setSellingStatus(item.name+": harga Rp "+p.toLocaleString("id-ID")+
-          " DIJADWALKAN untuk sheet setelah '"+sellingEditorSheet+"'. Sheet saat ini tidak berubah.");
+        setSellingStatus(item.name+": harga Rp "+price.toLocaleString("id-ID")
+          +" DIJADWALKAN untuk sheet sesudah '"+sellingEditorSheet+"'. Sheet saat ini tetap.");
         renderSellingPriceRows();
       }catch(e){setSellingStatus(errText(e),true);}
     });
     row.append(label,info,input,save);
     if(found){
       const cancel=document.createElement("button");
-      cancel.className="secondary-button";cancel.type="button";cancel.textContent="Batalkan pending";
+      cancel.type="button";
+      cancel.className="secondary-button";
+      cancel.textContent="Batalkan Harga Pending";
       cancel.addEventListener("click",async ()=>{
         try{
           if(!adminSessionAuthenticated)throw new Error("Masuk sebagai admin.");
           const clean=sellingPriceQueue().filter(p=>scheduledPriceId(p.source,p.group,p.row)!==found.id);
-          setSetting(PRICE_PENDING_KEY,clean);await saveSettings();renderSellingPriceRows();
-          setSellingStatus("Harga pending "+item.name+" dibatalkan; sheet belum diubah.");
+          setSetting(PRICE_PENDING_KEY,clean);
+          await saveSettings();
+          renderSellingPriceRows();
+          setSellingStatus("Harga pending "+item.name+" dibatalkan.");
         }catch(e){setSellingStatus(errText(e),true);}
       });
       row.appendChild(cancel);
     }
     container.appendChild(row);
   }
-  if(!matches.length)container.textContent="Barang tidak ditemukan.";
+  if(!matches.length){
+    const info=document.createElement("div");
+    info.className="empty-list";
+    info.textContent="Tidak ada produk pada kategori/pencarian ini.";
+    container.appendChild(info);
+  }
 }
 
 function readPurchaseRowDetails(purchaseData){
