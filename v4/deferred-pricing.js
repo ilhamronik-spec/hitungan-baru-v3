@@ -3,6 +3,7 @@
 // Prices are staged for the next sheet created from the selected SOURCE sheet.
 // Historical/current sheets are never changed by saving a scheduled price.
 const PRICE_PENDING_KEY="hitunganV4.pendingSellingPricesV1";
+const PRICE_EDITOR_BUILD="5.4.0";
 const LOW_MARGIN_FILL="#FFC7CE";
 const LOW_MARGIN_FONT="#9C0006";
 const MIN_MARGIN_RUPIAH=1000;
@@ -115,22 +116,21 @@ function renderSellingPriceRows(){
   const pending=sellingPriceQueue();
   const g=SELLING_PRICE_GROUPS[sellingEditorCategory];
   const matches=sellingEditorRows.filter(item=>item.displayName.toLocaleLowerCase("id-ID").includes(q));
-  // Show operator groups only when necessary, in the same Excel row order.
-  let lastOperator="";
+  // Exactly one title per product, as in Menu Belanja:
+  // "AXIS - 1.5 GB/1H", not an operator heading plus an ambiguous short title.
+  const buildLabel=document.getElementById("sellingPriceBuild");
+  if(buildLabel){
+    const example=matches[0]?.displayName||"tidak ada barang";
+    buildLabel.textContent="DAFTAR HARGA LENGKAP · v"+PRICE_EDITOR_BUILD+" · "+matches.length+" barang · contoh: "+example;
+  }
   for(const item of matches){
-    if(sellingEditorCategory==="paket" && item.operator!==lastOperator){
-      const section=document.createElement("div");
-      section.className="product-summary selling-section-heading";
-      section.textContent=item.operator || "Paket";
-      container.appendChild(section);
-      lastOperator=item.operator;
-    }
     const row=document.createElement("article");
     row.className="product-row selling-edit-row";
     row.dataset.sheetRow=String(item.row);
     const label=document.createElement("div");
     label.className="product-name";
     label.textContent=item.displayName;
+    label.title=item.displayName+" (baris Excel "+item.row+")";
     const info=document.createElement("div");
     info.className="product-meta";
     const rp=n=>Number.isFinite(n) && n>0 ? n.toLocaleString("id-ID") : "-";
