@@ -148,22 +148,23 @@ async function hbMarginApplyToSheet(entry){
     try{
       added=await hbEnsureMarginRules(ctx,sh);
     }finally{
-      // If admin just opened all sheets, do not re-lock against the admin mode.
-      if(isGlobalUnlockMode())return added;
-      // Restore the protection mode; never leave a historical sheet editable
-      // even if conditional formatting fails.
-      if(originallyProtected){
-        const fresh=hbMarginExcludedSheetIds();
-        if(fresh.has(String(sh.id))){
-          workingLock(sh,secretPw);
-        }else{
+      // If the admin opened all sheets while we were processing, preserve
+      // that mode. Never return from a finally block (it would hide errors).
+      if(!isGlobalUnlockMode()){
+        // Restore protection even if a format update failed.
+        if(originallyProtected){
+          const fresh=hbMarginExcludedSheetIds();
+          if(fresh.has(String(sh.id))){
+            workingLock(sh,secretPw);
+          }else{
+            fullLock(sh,secretPw);
+          }
+          await ctx.sync();
+        }else if(!excluded.has(String(sh.id))){
+          // Old unprotected sheets without an admin/shift exception are closed.
           fullLock(sh,secretPw);
+          await ctx.sync();
         }
-        await ctx.sync();
-      }else if(!excluded.has(String(sh.id))){
-        // Old sheets left editable without an active exception should be locked.
-        fullLock(sh,secretPw);
-        await ctx.sync();
       }
     }
     return added;
