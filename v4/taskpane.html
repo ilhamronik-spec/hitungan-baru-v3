@@ -13,7 +13,7 @@
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
     <script src="./mines-mask-recovery.js?v=2" defer></script>
-    <script src="./deferred-pricing.js?v=1.2.0" defer></script>
+    <script src="./deferred-pricing.js?v=1.3.0" defer></script>
     <script src="./margin-colors.js?v=1.2.0" defer></script>
   </head>
   <body>
@@ -21,7 +21,7 @@
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 5.2</h1>
+          <h1>Hitungan Baru Aman V4 · 5.3</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -97,7 +97,7 @@
 
       <section id="sellingPriceAdmin" class="security-card">
         <h2>Kelola Harga Jual — Berlaku Shift Berikutnya</h2>
-        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru berlaku saat sheet berikutnya dibuat. Paket: harga jual kolom C. Rokok: harga jual kolom B. Daftar mengikuti urutan barang di sheet asli.</p>
+        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru berlaku saat sheet berikutnya dibuat. Paket: harga jual kolom C. Rokok: harga jual kolom B. Daftar mengikuti urutan barang di sheet asli dan menampilkan operator beserta jenis paket (contoh: AXIS - 1.5 GB/1H).</p>
         <label for="sellingSourceSheet">Sheet sumber</label>
         <select id="sellingSourceSheet"></select>
         <label for="sellingCategory">Kategori</label>
