@@ -128,7 +128,7 @@ async function hbMarginRulesInstalled(context,sheet){
   return true;
 }
 
-async function hbMarginApplyToSheet(entry){
+async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
   return Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(entry.name);
     sh.load("id,name,protection/protected");
@@ -136,7 +136,7 @@ async function hbMarginApplyToSheet(entry){
     if(String(sh.id)!==String(entry.id))throw new Error("Identitas sheet berubah, batalkan pengeditan.");
     if(isGlobalUnlockMode())return 0;
     const excluded=hbMarginExcludedSheetIds();
-    if(excluded.has(String(sh.id)))return 0;
+    if(excluded.has(String(sh.id))&&!allowTrackedShift)return 0;
     if(await hbMarginRulesInstalled(ctx,sh))return 0;
     const originallyProtected=Boolean(sh.protection.protected);
     const secretPw=requireSecret();
@@ -169,6 +169,18 @@ async function hbMarginApplyToSheet(entry){
     }
     return added;
   });
+}
+
+async function hbMarginInstallNewSheet(name){
+  if(isGlobalUnlockMode())return 0;
+  const entry=await Excel.run(async ctx=>{
+    const sheet=ctx.workbook.worksheets.getActiveWorksheet();
+    sheet.load("id,name,protection/protected");
+    await ctx.sync();
+    return {id:String(sheet.id),name:sheet.name,protected:sheet.protection.protected};
+  });
+  if(entry.name!==name)throw new Error("Sheet terbaru berubah; warna margin tidak dipaksakan ke sheet lain.");
+  return hbMarginApplyToSheet(entry,true);
 }
 
 async function hbMarginReadSheets(){
