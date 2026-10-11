@@ -6,22 +6,22 @@
     <title>Hitungan Baru Aman V4</title>
     <link rel="stylesheet" href="./taskpane.css?v=5.0.0" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./taskpane.js?v=5.0.1" defer></script>
+    <script src="./taskpane.js?v=5.1.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
     <script src="./display-transfer.js?v=2" defer></script>
     <script src="./auto-lock.js?v=7" defer></script>
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
     <script src="./mines-mask-recovery.js?v=2" defer></script>
-    <script src="./deferred-pricing.js?v=1.1.0" defer></script>
-    <script src="./margin-colors.js?v=1.0.2" defer></script>
+    <script src="./deferred-pricing.js?v=1.2.0" defer></script>
+    <script src="./margin-colors.js?v=1.1.0" defer></script>
   </head>
   <body>
     <main class="pane">
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 5.0</h1>
+          <h1>Hitungan Baru Aman V4 · 5.1</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -97,7 +97,7 @@
 
       <section id="sellingPriceAdmin" class="security-card">
         <h2>Kelola Harga Jual — Berlaku Shift Berikutnya</h2>
-        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru otomatis dipakai saat sheet berikutnya dibuat dari sheet tersebut.</p>
+        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru berlaku saat sheet berikutnya dibuat. Paket: harga jual kolom C. Rokok: harga jual kolom B. Daftar mengikuti urutan barang di sheet asli.</p>
         <label for="sellingSourceSheet">Sheet sumber</label>
         <select id="sellingSourceSheet"></select>
         <label for="sellingCategory">Kategori</label>
@@ -114,7 +114,7 @@
 
       <section class="security-card" id="marginColorsPanel" aria-label="Warna margin barang">
         <h2>Warna Margin Paket dan Rokok</h2>
-        <p class="security-note">Otomatis memberi warna pada nama barang kolom A sesuai margin (harga jual C − harga dasar B), termasuk sheet lama.</p>
+        <p class="security-note">Otomatis memberi warna pada nama barang kolom A. Paket: margin C − B. Rokok: langsung dari margin kolom E. Berlaku pula untuk sheet lama.</p>
         <div class="margin-legend">
           <span><i style="background:#111111"></i>Minus</span>
           <span><i style="background:#EF4444"></i>Di bawah Rp500</span>
