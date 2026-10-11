@@ -10,7 +10,7 @@ const HB_MARGIN_GROUPS = [
   { name:"Rokok", first:178, last:238 }
 ];
 const HB_MARGIN_RULES = [
-  {key:"NEGATIVE", test:"d<0", fill:"#111111", font:"#FFFFFF", name:"Minus"},
+  {key:"NEGATIVE", test:"d<0", fill:"#000000", font:"#FFFFFF", name:"Minus"},
   {key:"RED", test:"AND(d>=0,d<500)", fill:"#EF4444", font:"#FFFFFF", name:"Di bawah Rp500"},
   {key:"GREY", test:"AND(d>=500,d<1000)", fill:"#9CA3AF", font:"#111827", name:"Rp500–999"},
   {key:"BLUE", test:"AND(d>1500,d<=3000)", fill:"#2563EB", font:"#FFFFFF", name:"Di atas Rp1.500"},
