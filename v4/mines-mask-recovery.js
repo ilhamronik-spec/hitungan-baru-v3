@@ -112,6 +112,11 @@ async function reconcileMinesMasks(manual=false){
     if(manual) updateMinesRecoveryStatus("Pemeriksaan sedang berjalan; tunggu hasilnya.",false);
     return;
   }
+  if(typeof hbMarginColorBusy !== "undefined" && hbMarginColorBusy){
+    updateMinesRecoveryStatus("Menunggu pembaruan warna margin selesai...", false);
+    scheduleMinesRecovery(9000);
+    return;
+  }
   minesRecoveryBusy = true;
   const btn=document.getElementById("repairMinusMasksBtn");
   if(btn)btn.disabled=true;
