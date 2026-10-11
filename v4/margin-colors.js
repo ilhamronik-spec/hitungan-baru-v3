@@ -215,12 +215,21 @@ async function hbMarginReconcileAll(manual=false){
   try{
     const sheets=await hbMarginReadSheets();
     const excluded=hbMarginExcludedSheetIds();
+    const now=Date.now();
+    const shiftId=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+    const shiftUntil=Number(getSetting("hitunganV4.shiftWorkUntil"));
+    const validShift=shiftId&&Number.isFinite(shiftUntil)&&shiftUntil>now;
+    const adminId=String(getSetting("hitunganV4.adminUnlockSheetId")||"");
+    const adminUntil=Number(getSetting("hitunganV4.adminUnlockUntil"));
+    const validAdmin=adminId&&Number.isFinite(adminUntil)&&adminUntil>now;
     hbMarginStatus("Memasang/memeriksa aturan warna pada "+sheets.length+" sheet...");
     for(const sh of sheets){
       if(isGlobalUnlockMode())break;
-      if(excluded.has(sh.id)){skipped++;continue;}
+      const working=Boolean(validShift&&sh.id===shiftId);
+      if(validAdmin&&sh.id===adminId){skipped++;continue;}
+      if(excluded.has(sh.id)&&!working){skipped++;continue;}
       try{
-        created+=await hbMarginApplyToSheet(sh);
+        created+=await hbMarginApplyToSheet(sh,working);
         completed++;
       }catch(e){
         failures.push(sh.name+" — "+(e&&e.message||String(e)));
