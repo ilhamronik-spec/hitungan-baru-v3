@@ -6,20 +6,21 @@
     <title>Hitungan Baru Aman V4</title>
     <link rel="stylesheet" href="./taskpane.css" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./taskpane.js?v=4.8.0" defer></script>
+    <script src="./taskpane.js?v=4.9.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
     <script src="./display-transfer.js?v=2" defer></script>
     <script src="./auto-lock.js?v=7" defer></script>
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
     <script src="./mines-mask-recovery.js?v=1" defer></script>
+    <script src="./deferred-pricing.js?v=1" defer></script>
   </head>
   <body>
     <main class="pane">
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 4.8</h1>
+          <h1>Hitungan Baru Aman V4 · 4.9</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -41,10 +42,36 @@
         <button id="setupSecurityBtn" type="button">AKTIFKAN HITUNGAN AMAN V4</button>
       </section>
 
-      <details id="adminSecurity" class="security-card" hidden>
-        <summary>Admin / Koreksi</summary>
-        <label for="adminPin">PIN admin</label>
-        <input id="adminPin" type="password" autocomplete="off" />
+
+      <nav id="menuChoice" class="role-entry" aria-label="Pilih menu">
+        <h2>Pilih akses</h2>
+        <button id="menuEmployeeBtn" type="button" class="role-card">
+          <strong>MENU KARYAWAN</strong>
+          <span>Buat sheet harian, belanja, tambah display, dan tutup shift.</span>
+        </button>
+        <button id="menuAdminBtn" type="button" class="role-card">
+          <strong>MENU ADMIN</strong>
+          <span>Masuk dengan PIN satu kali untuk pengaturan dan koreksi.</span>
+        </button>
+      </nav>
+
+      <section id="adminGate" class="security-card" hidden>
+        <h2>Masuk Menu Admin</h2>
+        <p class="security-note">Masukkan PIN sekali. Seluruh fitur admin terbuka sampai Anda keluar dari menu.</p>
+        <label for="adminGatePin">PIN Admin</label>
+        <input id="adminGatePin" type="password" autocomplete="off" />
+        <p id="adminGateStatus" class="security-note" role="status"></p>
+        <div class="admin-grid">
+          <button id="adminGateLoginBtn" type="button">MASUK ADMIN</button>
+          <button id="adminGateBackBtn" type="button" class="secondary-button">Kembali</button>
+        </div>
+      </section>
+
+      <section id="adminWorkspace" hidden>
+        <button id="adminLogoutBtn" type="button" class="secondary-button">Keluar dari Menu Admin</button>
+        <details id="adminSecurity" class="security-card" open hidden>
+        <summary>Proteksi Workbook dan Koreksi</summary>
+        <input id="adminPin" type="hidden" autocomplete="off" />
         <div class="admin-global-actions">
           <button id="adminUnlockAllSheetsBtn" type="button" class="secondary-button admin-unlock-all">BUKA SEMUA SHEET</button>
           <button id="adminLockAllSheetsBtn" type="button" class="secondary-button admin-lock-all">KUNCI SEMUA KEMBALI</button>
@@ -57,7 +84,7 @@
           <button id="adminUnlockStructureBtn" type="button" class="secondary-button">Buka Struktur 2 Menit</button>
           <button id="adminLockStructureBtn" type="button" class="secondary-button">Kunci Struktur Sekarang</button>
           <button id="adminSyncBtn" type="button" class="secondary-button">Sinkron Semua Sheet</button>
-          <button id="adminViewMinusBtn" type="button" class="secondary-button">Lihat Angka Mines (PIN)</button>
+          <button id="adminViewMinusBtn" type="button" class="secondary-button">Lihat Angka Mines</button>
         </div>
         <section id="minusPreview" class="security-card" hidden>
           <p class="security-note">Data rahasia — otomatis ditutup setelah 5 menit. Angka di lembar Excel tetap tersembunyi.</p>
@@ -66,13 +93,35 @@
         </section>
       </details>
 
+
+      <section id="sellingPriceAdmin" class="security-card">
+        <h2>Kelola Harga Jual — Berlaku Shift Berikutnya</h2>
+        <p class="security-note">Perubahan tidak memengaruhi sheet yang dipilih. Harga baru otomatis dipakai saat sheet berikutnya dibuat dari sheet tersebut.</p>
+        <label for="sellingSourceSheet">Sheet sumber</label>
+        <select id="sellingSourceSheet"></select>
+        <label for="sellingCategory">Kategori</label>
+        <select id="sellingCategory">
+          <option value="paket">Paket</option>
+          <option value="rokok">Rokok</option>
+        </select>
+        <label for="sellingPriceSearch">Cari barang</label>
+        <input id="sellingPriceSearch" type="search" placeholder="Cari nama paket atau rokok" autocomplete="off" />
+        <button id="refreshSellingPrices" class="secondary-button" type="button">Muat Daftar Harga</button>
+        <p id="sellingPriceStatus" class="security-note" aria-live="polite">Pilih sheet sumber untuk menjadwalkan perubahan harga.</p>
+        <div id="sellingPriceRows" class="product-list" aria-label="Daftar harga"></div>
+      </section>
+
       <section class="security-card" aria-label="Pengaman angka mines">
         <div class="security-title">Penutup Angka Mines (D275, D276, G275, J274)</div>
         <p id="minesMaskStatus" class="security-note" aria-live="polite">Pemeriksaan sheet lama belum dimulai...</p>
         <button id="repairMinusMasksBtn" class="secondary-button" type="button">PERBAIKI PENUTUP MINES SHEET LAMA</button>
       </section>
 
-      <form id="newDayForm" novalidate>
+      </section>
+      <section id="employeeWorkspace" hidden>
+        <button id="employeeBackBtn" type="button" class="secondary-button">Kembali ke Pilihan Menu</button>
+        <h2>Menu Karyawan</h2>
+        <form id="newDayForm" novalidate>
         <fieldset class="mode-fieldset">
           <legend>Jenis sheet</legend>
           <div class="segmented" role="radiogroup" aria-label="Jenis sheet">
@@ -153,7 +202,8 @@
         </button>
       </form>
 
-      <div id="status" class="status" role="status" aria-live="polite"></div>
+        <div id="status" class="status" role="status" aria-live="polite"></div>
+      </section>
     </main>
   </body>
 </html>
