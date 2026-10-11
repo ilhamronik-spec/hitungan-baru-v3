@@ -403,3 +403,10 @@ button:disabled {
 .selling-edit-row { display:flex; flex-direction:column; gap:5px; }
 .selling-edit-row .selling-save { margin:0; }
 #adminGateStatus { color:#b42318; }
+
+/* V5 margin levels in the Admin workspace. */
+.margin-legend {display:grid; grid-template-columns:1fr; gap:7px; padding:8px 0;}
+.margin-legend span {display:flex; gap:9px; align-items:center; font-size:12px; color:#334155;}
+.margin-legend i {display:inline-block; width:16px; height:16px; border-radius:4px; border:1px solid rgba(0,0,0,.12); flex:0 0 16px;}
+#marginColorsPanel {display:grid; gap:8px;}
+#marginColorStatus {overflow-wrap:anywhere;}
