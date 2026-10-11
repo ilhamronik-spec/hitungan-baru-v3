@@ -168,9 +168,8 @@ async function restoreShiftWorkWindow() {
   if (!sheetId || !untilRaw) {
     // An earlier version may have created a working sheet without a timer.
     // Fail closed rather than silently leave that sheet editable indefinitely.
-    if(!persistentAdminUnlockActive() && typeof maskExistingClosedSheets==="function"){
-      await maskExistingClosedSheets();
-    }
+    // Recovery and its result verification are handled by mines-mask-recovery.js.
+    // Do not race a second protection loop while Excel Online is loading.
     await refreshShiftUi();
     return;
   }
