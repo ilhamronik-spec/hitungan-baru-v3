@@ -129,8 +129,7 @@ function startSecurityUi(){
         }else{
           setGlobalUnlockUi(false);
           await enforceStructure();
-          await maskExistingClosedSheets();
-          setSecurityStatus("AMAN — struktur workbook terkunci; angka mines pada sheet lama disembunyikan.",false);
+          setSecurityStatus("AMAN — struktur workbook terkunci. Pemeriksaan mines tersedia pada panel Penutup Angka Mines.",false);
         }
       }catch(e){setSecurityStatus(errText(e),true);}
     }
