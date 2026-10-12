@@ -6,13 +6,13 @@
     <title>Hitungan Baru Aman V4</title>
     <link rel="stylesheet" href="./taskpane.css?v=5.4.0" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./taskpane.js?v=5.1.0" defer></script>
+    <script src="./taskpane.js?v=5.5.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
     <script src="./display-transfer.js?v=2" defer></script>
     <script src="./auto-lock.js?v=7" defer></script>
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
-    <script src="./mines-mask-recovery.js?v=2" defer></script>
+    <script src="./mines-mask-recovery.js?v=5.5.0" defer></script>
     <script src="./deferred-pricing.js?v=5.4.0" defer></script>
     <script src="./margin-colors.js?v=1.2.0" defer></script>
   </head>
@@ -21,7 +21,7 @@
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 5.4</h1>
+          <h1>Hitungan Baru Aman V4 · 5.5</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -128,9 +128,9 @@
         <button id="marginColorRefreshBtn" class="secondary-button" type="button">PERIKSA ULANG WARNA SEMUA SHEET</button>
       </section>
       <section class="security-card" aria-label="Pengaman angka mines">
-        <div class="security-title">Penutup Angka Mines (D275, D276, G275, J274)</div>
-        <p id="minesMaskStatus" class="security-note" aria-live="polite">Pemeriksaan sheet lama belum dimulai...</p>
-        <button id="repairMinusMasksBtn" class="secondary-button" type="button">PERBAIKI PENUTUP MINES SHEET LAMA</button>
+        <div class="security-title">Penutup Angka Mines — Tetap Terbaca SmartSDM</div>
+        <p id="minesMaskStatus" class="security-note" aria-live="polite">Pemeriksaan D275, D276, G275, J274 belum dimulai...</p>
+        <button id="repairMinusMasksBtn" class="secondary-button" type="button">PULIHKAN FORMAT ANGKA MINES (TETAP HITAM)</button>
       </section>
 
       </section>
