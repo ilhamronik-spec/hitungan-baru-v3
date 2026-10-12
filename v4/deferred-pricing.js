@@ -3,7 +3,8 @@
 // Prices are staged for the next sheet created from the selected SOURCE sheet.
 // Historical/current sheets are never changed by saving a scheduled price.
 const PRICE_PENDING_KEY="hitunganV4.pendingSellingPricesV1";
-const PRICE_EDITOR_BUILD="5.4.0";
+const PRICE_EDITOR_BUILD="5.6.0";
+const PRICE_LAST_APPLIED_KEY="hitunganV4.priceLastAppliedV1";
 const LOW_MARGIN_FILL="#FFC7CE";
 const LOW_MARGIN_FONT="#9C0006";
 const MIN_MARGIN_RUPIAH=1000;
@@ -34,7 +35,36 @@ function setSellingStatus(t,error=false){
   el.style.color=error?"#a4262c":"#15613b";
 }
 function getSourcePriceChanges(sheetName){
+  // Backwards compatible source-specific listing for older callers.
   return sellingPriceQueue().filter(item=>item.source===sheetName);
+}
+// A chosen source sheet is a PRICE REFERENCE, not a gate on which sheet can
+// be used to create the next shift. The next newly created sheet receives all
+// staged changes once, irrespective of the active source sheet name.
+function getNextShiftPriceChanges(){
+  const latest=new Map();
+  for(const change of sellingPriceQueue()){
+    const cfg=SELLING_PRICE_GROUPS[change.group];
+    const row=Number(change.row),price=Number(change.price);
+    if(!cfg||!Number.isInteger(row)||row<cfg.start||row>cfg.end||
+       !Number.isSafeInteger(price)||price<=0||!String(change.name||"").trim())continue;
+    const key=change.group+"|"+row;
+    const prior=latest.get(key);
+    if(!prior||Number(change.savedAt||0)>=Number(prior.savedAt||0))latest.set(key,change);
+  }
+  return [...latest.values()].sort((a,b)=>(a.group+"|"+a.row).localeCompare(b.group+"|"+b.row));
+}
+function updatePendingPricesStatus(){
+  const el=document.getElementById("sellingPendingSummary");
+  if(!el)return;
+  const list=getNextShiftPriceChanges();
+  const completed=getSetting(PRICE_LAST_APPLIED_KEY);
+  el.textContent=list.length?
+    list.length+" perubahan harga MENUNGGU sheet berikutnya. Berlaku pada sheet yang dibuat setelah penjadwalan; tidak harus dari sheet sumber yang dipilih."
+    : (completed && completed.target?
+       "Tidak ada harga pending. Terakhir diterapkan pada sheet: "+completed.target+
+        " ("+(Array.isArray(completed.applied)?completed.applied.length:0)+" barang).":
+       "Tidak ada perubahan harga yang menunggu shift berikutnya.");
 }
 
 async function loadSellingPriceSheets(){
@@ -106,6 +136,7 @@ async function loadSellingPriceRows(){
   });
   sellingEditorRows=rows;
   renderSellingPriceRows();
+  updatePendingPricesStatus();
 }
 
 function renderSellingPriceRows(){
@@ -141,7 +172,7 @@ function renderSellingPriceRows(){
     input.min="1"; input.step="1";
     input.placeholder="Harga jual untuk shift berikutnya";
     input.setAttribute("aria-label","Harga baru "+item.displayName);
-    const found=pending.find(p=>p.source===sellingEditorSheet && p.group===sellingEditorCategory && p.row===item.row);
+    const found=getNextShiftPriceChanges().find(p=>p.group===sellingEditorCategory && p.row===item.row);
     if(found)input.value=String(found.price);
     const save=document.createElement("button");
     save.type="button";
@@ -153,7 +184,9 @@ function renderSellingPriceRows(){
         const price=Number(input.value);
         if(!Number.isSafeInteger(price)||price<=0)throw new Error("Harga harus berupa rupiah bulat positif.");
         const key=scheduledPriceId(sellingEditorSheet,sellingEditorCategory,item.row);
-        const clean=sellingPriceQueue().filter(p=>scheduledPriceId(p.source,p.group,p.row)!==key);
+        // Only one future price per SKU. Replacing a prior schedule from any
+        // other source sheet avoids contradictory next-shift price updates.
+        const clean=sellingPriceQueue().filter(p=>!(p.group===sellingEditorCategory && Number(p.row)===item.row));
         clean.push({source:sellingEditorSheet,group:sellingEditorCategory,row:item.row,
           name:item.name,price,savedAt:Date.now(),id:key});
         setSetting(PRICE_PENDING_KEY,clean);
@@ -161,6 +194,7 @@ function renderSellingPriceRows(){
         setSellingStatus(item.displayName+": harga Rp "+price.toLocaleString("id-ID")
           +" DIJADWALKAN untuk sheet sesudah '"+sellingEditorSheet+"'. Sheet saat ini tetap.");
         renderSellingPriceRows();
+        updatePendingPricesStatus();
       }catch(e){setSellingStatus(errText(e),true);}
     });
     row.append(label,info,input,save);
@@ -176,6 +210,7 @@ function renderSellingPriceRows(){
           setSetting(PRICE_PENDING_KEY,clean);
           await saveSettings();
           renderSellingPriceRows();
+          updatePendingPricesStatus();
           setSellingStatus("Harga pending "+item.displayName+" dibatalkan.");
         }catch(e){setSellingStatus(errText(e),true);}
       });
@@ -228,11 +263,12 @@ function readPurchaseRowDetails(purchaseData){
 // Called by the central V4 create wrapper ONLY on the new worksheet.
 // The source sheet is used to validate when a pending price becomes effective.
 async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
-  const queue=getSourcePriceChanges(sourceName);
+  const queue=getNextShiftPriceChanges();
   const purchases=readPurchaseRowDetails(purchaseData);
   const alerts=[];
   const applied=[];
   const skipped=[];
+  newSheet.load("name");
   // The newly copied sheet may inherit alert styling from the source.
   const sellCells=[];
   for(const group of Object.keys(SELLING_PRICE_GROUPS)){
@@ -255,14 +291,30 @@ async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
       cell.format.font.color="#000000";
     }
   }
+  const verified=[];
   for(const {item,cell} of checks){
     const cfg=SELLING_PRICE_GROUPS[item.group];
-    if(!cfg||item.row<cfg.start||item.row>cfg.end||sellingName(cell.values[0][0])!==sellingName(item.name)){
+    if(!cfg||item.row<cfg.start||item.row>cfg.end||
+       newSheet.name===item.source||
+       sellingName(cell.values[0][0])!==sellingName(item.name)){
       skipped.push(item.name+" (nama/baris tidak cocok)");
       continue;
     }
-    newSheet.getRange(cfg.sellColumn+item.row).values=[[item.price]];
-    applied.push(item.id);
+    const target=newSheet.getRange(cfg.sellColumn+item.row);
+    target.values=[[Number(item.price)]];
+    // The pending entry is NOT consumed unless Excel confirms the new value.
+    target.load("values");
+    verified.push({item,target});
+  }
+  await context.sync();
+  for(const {item,target} of verified){
+    const actual=target.values[0][0];
+    if(Number(actual)!==Number(item.price)){
+      throw new Error("Harga pending "+item.name+" baris "+item.row+
+        " belum tersimpan pada sheet baru: diharapkan "+item.price+", terbaca "+actual);
+    }
+    applied.push({group:item.group,row:Number(item.row),price:Number(item.price),
+      savedAt:Number(item.savedAt||0),id:item.id});
   }
   const sell= purchases.map(item=>({
     item, cell:newSheet.getRange(SELLING_PRICE_GROUPS[item.group].sellColumn+item.row)
@@ -281,12 +333,17 @@ async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
   return {applied,skipped,alerts};
 }
 
-async function consumeEffectivePrices(ids){
-  if(!ids||!ids.length)return;
-  const done=new Set(ids);
-  const rest=sellingPriceQueue().filter(p=>!done.has(p.id));
+async function consumeEffectivePrices(applied, targetName){
+  if(!applied||!applied.length)return;
+  // Do not consume a newer edit scheduled while Excel was creating the sheet.
+  const rest=sellingPriceQueue().filter(p=>!applied.some(a=>
+    a.group===p.group&&Number(a.row)===Number(p.row)&&
+    Number(p.savedAt||0)<=Number(a.savedAt||0)
+  ));
   setSetting(PRICE_PENDING_KEY,rest);
+  setSetting(PRICE_LAST_APPLIED_KEY,{target:targetName,applied,at:Date.now()});
   await saveSettings();
+  updatePendingPricesStatus();
 }
 function initSellingPriceEditor(){
   const source=document.getElementById("sellingSourceSheet");
