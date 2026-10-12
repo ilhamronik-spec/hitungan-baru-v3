@@ -345,12 +345,66 @@ async function consumeEffectivePrices(applied, targetName){
   await saveSettings();
   updatePendingPricesStatus();
 }
+
+async function applyPendingPricesToActiveSheet(){
+  const confirm=document.getElementById("sellingRepairConfirm");
+  try{
+    if(typeof adminSessionAuthenticated==="undefined"||!adminSessionAuthenticated)
+      throw new Error("Masuk ke Menu Admin dengan PIN terlebih dahulu.");
+    if(!confirm||!confirm.checked)
+      throw new Error("Centang konfirmasi bahwa sheet yang sedang dibuka adalah sheet tujuan.");
+    if(isGlobalUnlockMode())throw new Error("Matikan mode BUKA SEMUA SHEET dahulu.");
+    const changes=getNextShiftPriceChanges();
+    if(!changes.length)throw new Error("Tidak ada harga pending. Jadwalkan kembali harga yang belum berubah dahulu.");
+    const pw=requireSecret();
+    const outcome=await Excel.run(async ctx=>{
+      const sh=ctx.workbook.worksheets.getActiveWorksheet();
+      sh.load("id,name,protection/protected");
+      await ctx.sync();
+      if(changes.every(p=>p.source===sh.name))
+        throw new Error('Sheet "'+sh.name+'" masih sheet referensi. Buka sheet BARU yang ingin diperbaiki.');
+      const originalProtected=sh.protection.protected;
+      if(originalProtected){sh.protection.unprotect(pw);await ctx.sync();}
+      let result={applied:[],skipped:[],alerts:[]};
+      let thrown=null;
+      try{
+        result=await applyNextShiftPricing(ctx,sh,null,{});
+        sh.calculate(true);
+        await ctx.sync();
+      }catch(e){thrown=e;}
+      // Restore protection before propagating Excel errors.
+      if(originalProtected){
+        const workId=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+        const until=Number(getSetting("hitunganV4.shiftWorkUntil"));
+        const active=workId===String(sh.id)&&Number.isFinite(until)&&Date.now()<until;
+        if(active)workingLock(sh,pw);
+        else fullLock(sh,pw);
+        await ctx.sync();
+      }
+      if(thrown)throw thrown;
+      return {target:sh.name,result};
+    });
+    if(outcome.result.applied.length){
+      await consumeEffectivePrices(outcome.result.applied,outcome.target);
+    }
+    confirm.checked=false;
+    setSellingStatus("PULIH HARGA: "+outcome.result.applied.length+
+      ' harga terverifikasi di sheet "'+outcome.target+'". '+
+      (outcome.result.skipped.length?outcome.result.skipped.join("; "):"Harga pending yang berhasil sudah dihapus dari antrean."),
+      Boolean(outcome.result.skipped.length));
+    updatePendingPricesStatus();
+  }catch(e){setSellingStatus("GAGAL PULIH HARGA: "+errText(e),true);}
+}
+
 function initSellingPriceEditor(){
   const source=document.getElementById("sellingSourceSheet");
   const cat=document.getElementById("sellingCategory");
   const search=document.getElementById("sellingPriceSearch");
   const refresh=document.getElementById("refreshSellingPrices");
   if(!source||!cat||!search||!refresh)return;
+  const recovery=document.getElementById("sellingRepairNowBtn");
+  if(recovery)recovery.addEventListener("click",applyPendingPricesToActiveSheet);
+  updatePendingPricesStatus();
   source.addEventListener("change",()=>loadSellingPriceRows().catch(e=>setSellingStatus(errText(e),true)));
   cat.addEventListener("change",()=>loadSellingPriceRows().catch(e=>setSellingStatus(errText(e),true)));
   search.addEventListener("input",renderSellingPriceRows);
