@@ -189,6 +189,8 @@ async function setupSecurity(){
 function workingLock(sh,pw){
   const w=sh.getRange(WORK_AREA); w.format.protection.locked=false; w.format.protection.formulaHidden=false;
   for(const a of LOCK_RANGES){const r=sh.getRange(a);r.format.protection.locked=true;r.format.protection.formulaHidden=true;}
+  // Do not conceal mines from external Excel integrations while a shift is active.
+  for(const address of MINES_CELLS){sh.getRange(address).format.protection.formulaHidden=false;}
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.unlocked,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
 const MINES_CELLS = ["D275","D276","G275","J274"];
