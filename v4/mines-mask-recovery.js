@@ -3,7 +3,7 @@
 // Separate, verifiable recovery for already-protected historical worksheets.
 // This does not change cell values or formulas. The existing V4 fullLock handles
 // protection, while this routine verifies the actual displayed cell formatting.
-const MINES_MASK_BUILD = "4.8.0";
+const MINES_MASK_BUILD = "5.5.0";
 const MINES_RETRY_DELAY = 20000;
 let minesRecoveryBusy = false;
 let minesRecoveryTimer = null;
@@ -13,7 +13,7 @@ Office.onReady(info => {
   if (info.host !== Office.HostType.Excel) return;
   const btn = document.getElementById("repairMinusMasksBtn");
   if (btn) btn.addEventListener("click", () => reconcileMinesMasks(true));
-  updateMinesRecoveryStatus("Versi 4.8.0 — memeriksa penutup angka sheet lama...",false);
+  updateMinesRecoveryStatus("Versi 5.5.0 — memulihkan teks mines agar terbaca SmartSDM...",false);
   scheduleMinesRecovery(2000);
 });
 
@@ -44,66 +44,108 @@ function minesExpectedExcludedIds() {
   return result;
 }
 
-async function scanMinesMasks() {
-  const excluded = minesExpectedExcludedIds();
-  return Excel.run(async c => {
+function minesCellReadable(r){
+  const f=String(r.numberFormat[0][0]||"");
+  const number=r.values[0][0];
+  return !minesHasInvisibleNumberFormat(f) &&
+    (number===null||number===""||String(r.text[0][0]||"").trim()!=="");
+}
+async function scanMinesMasks(){
+  const excluded=minesExpectedExcludedIds();
+  return Excel.run(async c=>{
     const sheets=c.workbook.worksheets;
     sheets.load("items");
     await c.sync();
-    const data=[];
-    for (const sh of sheets.items) {
+    const found=[];
+    for(const sh of sheets.items){
       sh.load("id,name,protection/protected");
       const probes=MINES_CELLS.map(address=>{
         const r=sh.getRange(address);
         r.format.fill.load("color");
-        r.load("numberFormat");
+        r.format.font.load("color");
+        r.load("numberFormat,values,text");
         return r;
       });
-      data.push({sh,probes});
+      found.push({sh,probes});
     }
     await c.sync();
-    return data.map(({sh,probes})=>{
-      const masked=probes.every(r=>
-        String(r.format.fill.color||"").toUpperCase()==="#000000" &&
-        String(r.numberFormat[0][0]||"").trim()===";;;"
+    return found.map(({sh,probes})=>{
+      const visibleToApps=probes.every(minesCellReadable);
+      const fillCorrect=probes.every(r=>
+        String(r.format.fill.color||"").toUpperCase()==="#000000"&&
+        String(r.format.font.color||"").toUpperCase()==="#000000"
       );
       return {id:String(sh.id),name:sh.name,
-        protected:Boolean(sh.protection.protected),masked,
+        protected:Boolean(sh.protection.protected),
+        masked:visibleToApps&&fillCorrect,
+        unreadable:!visibleToApps,
         excluded:excluded.has(String(sh.id))};
     });
   });
 }
 
-async function maskOneClosedSheet(entry, pw) {
+async function maskOneClosedSheet(entry,pw){
   return Excel.run(async c=>{
     const sh=c.workbook.worksheets.getItem(entry.name);
     sh.load("id,name,protection/protected");
     await c.sync();
-    if(minesExpectedExcludedIds().has(String(sh.id)) || isGlobalUnlockMode())return "skipped";
-    // A protected sheet must be unlocked and synchronized before formatting.
-    // Excel Online may reject changing formats in the same unprotect batch.
+    if(minesExpectedExcludedIds().has(String(sh.id))||isGlobalUnlockMode())return "skipped";
     if(sh.protection.protected){
       sh.protection.unprotect(pw);
       await c.sync();
     }
+    // Repair ONLY previous hidden-number-format damage; do not change data.
+    await restoreMinesReadableNumbers(c,sh,false);
     maskMinusCells(sh);
     await c.sync();
     fullLock(sh,pw);
     await c.sync();
+
     sh.protection.load("protected");
     const checks=MINES_CELLS.map(address=>{
       const r=sh.getRange(address);
       r.format.fill.load("color");
+      r.format.font.load("color");
+      r.load("numberFormat,values,text");
+      return r;
+    });
+    await c.sync();
+    if(!sh.protection.protected||
+       checks.some(r=>String(r.format.fill.color||"").toUpperCase()!=="#000000"||
+                      String(r.format.font.color||"").toUpperCase()!=="#000000"||
+                      !minesCellReadable(r))){
+      throw new Error('Teks angka / format hitam sheet "'+entry.name+'" belum berhasil diverifikasi.');
+    }
+    return "masked";
+  });
+}
+
+// Existing active shifts from older builds must also become readable, while
+// preserving their original remaining 2.5-hour window and protection mode.
+async function restoreActiveShiftMines(){
+  if(isGlobalUnlockMode())return 0;
+  const id=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+  const until=Number(getSetting("hitunganV4.shiftWorkUntil"));
+  if(!id||!Number.isFinite(until)||until<=Date.now())return 0;
+  const pw=requireSecret();
+  return Excel.run(async c=>{
+    const sh=c.workbook.worksheets.getItem(id);
+    sh.load("protection/protected");
+    const ranges=MINES_CELLS.map(a=>{
+      const r=sh.getRange(a);
       r.load("numberFormat");
       return r;
     });
     await c.sync();
-    if(!sh.protection.protected ||
-       checks.some(r=>String(r.format.fill.color||"").toUpperCase()!=="#000000" ||
-                      String(r.numberFormat[0][0]||"").trim()!==";;;")){
-      throw new Error('Format hitam/proteksi sheet "'+entry.name+'" belum terverifikasi');
+    if(!ranges.some(r=>minesHasInvisibleNumberFormat(r.numberFormat[0][0])))return 0;
+    if(sh.protection.protected){
+      sh.protection.unprotect(pw);
+      await c.sync();
     }
-    return "masked";
+    const result=await restoreMinesReadableNumbers(c,sh,true);
+    workingLock(sh,pw);
+    await c.sync();
+    return result.restored;
   });
 }
 
@@ -129,7 +171,8 @@ async function reconcileMinesMasks(manual=false){
       updateMinesRecoveryStatus("Mode BUKA SEMUA aktif. Penguncian dan penutup mines berjalan setelah mode ini berakhir.",false);
       return;
     }
-    updateMinesRecoveryStatus("Memeriksa empat sel mines pada sheet lama...",false);
+    updateMinesRecoveryStatus("Memeriksa angka mines dan memulihkan format teks yang disembunyikan versi lama...",false);
+    const activeRestored=await restoreActiveShiftMines();
     const list=await scanMinesMasks();
     const targets=list.filter(s=>!s.excluded && (!s.masked || !s.protected));
     let completed=0;
@@ -152,7 +195,7 @@ async function reconcileMinesMasks(manual=false){
     }
     minesRecoveryAttempts=0;
     updateMinesRecoveryStatus("BERHASIL — "+(final.length-final.filter(s=>s.excluded).length)+
-       " sheet lama sudah diverifikasi. Empat sel mines berwarna hitam dan terkunci. Build "+MINES_MASK_BUILD,false);
+       " sheet diperiksa; "+activeRestored+" format pada shift aktif dipulihkan. Nilai tetap ada, teks angka bisa dibaca aplikasi, dan warna hitam tetap menutup sheet terkunci. Build "+MINES_MASK_BUILD,false);
   }catch(e){
     minesRecoveryAttempts++;
     const reason=e&&e.message?e.message:String(e);
