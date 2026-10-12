@@ -43,8 +43,9 @@ function installWrappers(){
       let pricingResult={applied:[],skipped:[],alerts:[]};
       await Excel.run(async c=>{
         const wb=c.workbook, sheets=wb.worksheets, newest=sheets.getActiveWorksheet(), old=sheets.getItem(sourceName);
-        wb.protection.load("protected"); newest.load("protection/protected"); old.load("protection/protected");
+        wb.protection.load("protected"); newest.load("name,protection/protected"); old.load("protection/protected");
         await c.sync();
+        if(newest.name!==sheetName)throw new Error("Sheet baru yang aktif bukan '"+sheetName+"'; harga pending tidak diterapkan untuk menghindari salah sheet.");
         if(newest.protection.protected) newest.protection.unprotect(pw);
         if(old.protection.protected) old.protection.unprotect(pw);
         if(typeof applyNextShiftPricing==="function"){
@@ -79,9 +80,14 @@ function installWrappers(){
         }
       }
       if(pricingResult.applied.length && typeof consumeEffectivePrices==="function"){
-        await consumeEffectivePrices(pricingResult.applied);
+        await consumeEffectivePrices(pricingResult.applied,sheetName);
       }
-      if(marginColorWarning){
+      if(!pricingResult.applied.length && typeof getNextShiftPriceChanges==="function" &&
+         getNextShiftPriceChanges().length && !pricingResult.skipped.length){
+        setSecurityStatus("PERINGATAN: "+getNextShiftPriceChanges().length+
+          " harga masih pending sesudah sheet '"+sheetName+
+          "' dibuat. Periksa status di Admin > Kelola Harga Jual.",true);
+      }else if(marginColorWarning){
         setSecurityStatus("Sheet baru berhasil dibuat, tetapi warna margin belum diterapkan: "+marginColorWarning+". Periksa ulang melalui Menu Admin.",true);
       }else if(pricingResult.skipped.length){
         setSecurityStatus("PERINGATAN HARGA: "+pricingResult.skipped.join(", ")+" belum diterapkan; harga pending tetap tersimpan.",true);
