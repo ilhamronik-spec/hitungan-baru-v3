@@ -50,6 +50,9 @@ function installWrappers(){
         if(typeof applyNextShiftPricing==="function"){
           pricingResult=await applyNextShiftPricing(c,newest,sourceName,purchaseData);
         }
+        // The new sheet may be cloned from a full-locked sheet with ";;;".
+        // Restore readable number text and unmask only the current work shift.
+        await restoreMinesReadableNumbers(c,newest,true);
         newest.calculate(true);
         if(isGlobalUnlockMode()){
           // Mode admin persisten: sheet lama dan baru harus tetap terbuka.
@@ -189,15 +192,46 @@ function workingLock(sh,pw){
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.unlocked,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
 const MINES_CELLS = ["D275","D276","G275","J274"];
+// Format ";;;" was incorrectly installed by previous builds: it hides the
+// formatted TEXT read by external apps such as SmartSDM, not the raw number.
+// This readable fallback is applied ONLY to cells already damaged by ";;;".
+const MINES_RECOVERY_NUMBER_FORMAT = '"Rp" #,##0;-"Rp" #,##0;"Rp" 0';
+function minesHasInvisibleNumberFormat(format){
+  return typeof format==="string" && format.replace(/\s/g,"")===";;;";
+}
 function maskMinusCells(sh){
+  // VISUAL ONLY: Never replace number formats, values or formulas here.
   for(const address of MINES_CELLS){
     const r=sh.getRange(address);
-    r.numberFormat=[[";;;"]];
     r.format.fill.color="#000000";
     r.format.font.color="#000000";
     r.format.protection.locked=true;
-    r.format.protection.formulaHidden=true;
+    r.format.protection.formulaHidden=false;
   }
+}
+async function restoreMinesReadableNumbers(context,sh,activeSheet=false){
+  const ranges=MINES_CELLS.map(address=>{
+    const r=sh.getRange(address);
+    r.load("numberFormat");
+    if(activeSheet)r.format.fill.load("color");
+    return r;
+  });
+  await context.sync();
+  let restored=0,shown=0;
+  for(const r of ranges){
+    if(minesHasInvisibleNumberFormat(r.numberFormat[0][0])){
+      r.numberFormat=[[MINES_RECOVERY_NUMBER_FORMAT]];
+      restored++;
+    }
+    if(activeSheet && String(r.format.fill.color||"").toUpperCase()==="#000000"){
+      // The new active shift must not inherit the previous closed sheet's mask.
+      r.format.fill.clear();
+      r.format.font.color="#000000";
+      shown++;
+    }
+  }
+  if(restored||shown)await context.sync();
+  return {restored,shown};
 }
 function fullLock(sh,pw){
   const w=sh.getRange(WORK_AREA); w.format.protection.locked=true; w.format.protection.formulaHidden=true;
@@ -469,8 +503,7 @@ async function adminViewMinus(){
     for(const row of data.rows){
       const line=document.createElement("div");
       line.style.padding="5px 0";
-      // text may be blank because the worksheet uses a hidden number format.
-      // raw numeric values remain accessible through the Office Excel API.
+      // Read the actual value; previous builds hid formatted text with ';;;'.
       line.textContent=row.address+" : "+(row.raw===null||row.raw===""?"(kosong)":String(row.raw));
       target.appendChild(line);
     }
