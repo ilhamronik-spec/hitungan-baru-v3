@@ -79,10 +79,18 @@ function installWrappers(){
           if(typeof hbMarginQueueRetry==="function")hbMarginQueueRetry(12000);
         }
       }
-      if(pricingResult.applied.length && typeof consumeEffectivePrices==="function"){
+      // If the outer shift wrapper is installed, keep pending entries intact
+      // until the LAST worksheet readback verifies prices after all wrappers.
+      // This avoids deleting schedules based on an intermediate Excel state.
+      const finalPriceCheckPending=
+        typeof shiftCreateWrapped!=="undefined"&&shiftCreateWrapped&&
+        typeof verifyAndFinalizeNextShiftPricing==="function";
+      if(pricingResult.applied.length && !finalPriceCheckPending &&
+         typeof consumeEffectivePrices==="function"){
         await consumeEffectivePrices(pricingResult.applied,sheetName);
       }
-      if(!pricingResult.applied.length && typeof getNextShiftPriceChanges==="function" &&
+      if(!finalPriceCheckPending && !pricingResult.applied.length &&
+         typeof getNextShiftPriceChanges==="function" &&
          getNextShiftPriceChanges().length && !pricingResult.skipped.length){
         setSecurityStatus("PERINGATAN: "+getNextShiftPriceChanges().length+
           " harga masih pending sesudah sheet '"+sheetName+
