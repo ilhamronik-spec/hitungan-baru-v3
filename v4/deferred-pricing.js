@@ -3,7 +3,10 @@
 // Prices are staged for the next sheet created from the selected SOURCE sheet.
 // Historical/current sheets are never changed by saving a scheduled price.
 const PRICE_PENDING_KEY="hitunganV4.pendingSellingPricesV1";
-const PRICE_EDITOR_BUILD="5.6.0";
+const PRICE_EDITOR_BUILD="5.7.0";
+const PRICE_AUDIT_KEY="hitunganV4.priceAuditV2";
+const PRICE_QUEUE_BACKUP_KEY="hitunganV4.priceQueueBackupV2";
+const PRICE_AUDIT_LIMIT=300;
 const PRICE_LAST_APPLIED_KEY="hitunganV4.priceLastAppliedV1";
 const LOW_MARGIN_FILL="#FFC7CE";
 const LOW_MARGIN_FONT="#9C0006";
@@ -20,6 +23,93 @@ function sellingPriceQueue(){
   const raw=getSetting(PRICE_PENDING_KEY);
   return Array.isArray(raw)?raw.filter(p=>p&&typeof p==="object"):[];
 }
+
+function priceAuditHistory(){
+  const raw=getSetting(PRICE_AUDIT_KEY);
+  return Array.isArray(raw)?raw.filter(x=>x&&typeof x==="object"):[];
+}
+function recordPriceAudit(event,change,extra={}){
+  const log=priceAuditHistory();
+  log.push({event,group:change.group,row:Number(change.row),name:String(change.name||""),
+    source:String(change.source||""),price:Number(change.price),savedAt:Number(change.savedAt||0),
+    date:Date.now(),...extra});
+  setSetting(PRICE_AUDIT_KEY,log.slice(-PRICE_AUDIT_LIMIT));
+}
+function priceRecoveryCandidates(){
+  const all=[];
+  for(const p of sellingPriceQueue())if(p&&p.group)all.push({...p,event:"pending"});
+  const backup=getSetting(PRICE_QUEUE_BACKUP_KEY);
+  if(Array.isArray(backup))for(const p of backup)if(p&&p.group)all.push({...p,event:"cadangan"});
+  for(const p of priceAuditHistory())if(p&&p.group)all.push(p);
+  const legacy=getSetting(PRICE_LAST_APPLIED_KEY);
+  if(legacy&&Array.isArray(legacy.applied)){
+    for(const p of legacy.applied)all.push({...p,name:p.name||"",source:p.source||"",
+      event:"catatan-lama",target:legacy.target,date:Number(legacy.at||0)});
+  }
+  const dedup=new Map();
+  for(const p of all){
+    if(!SELLING_PRICE_GROUPS[p.group]||!Number.isSafeInteger(Number(p.price)))continue;
+    const key=[p.group,p.row,p.price,p.savedAt].join("|");
+    const former=dedup.get(key);
+    if(!former||Number(p.date||0)>Number(former.date||0))dedup.set(key,p);
+  }
+  return [...dedup.values()].sort((a,b)=>Number(b.date||b.savedAt||0)-Number(a.date||a.savedAt||0));
+}
+function renderPriceAudit(){
+  const container=document.getElementById("sellingPriceHistory");
+  if(!container)return;
+  container.replaceChildren();
+  const candidates=priceRecoveryCandidates().slice(0,40);
+  if(!candidates.length){
+    container.textContent="Belum ada riwayat atau cadangan harga di pengaturan workbook. Perubahan yang sudah hilang dari versi lama tidak dapat direkonstruksi dari kode GitHub.";
+    return;
+  }
+  for(const p of candidates){
+    const item=document.createElement("div");item.className="product-row selling-edit-row";
+    const header=document.createElement("strong");
+    header.textContent=(p.group==="paket"?"Paket":"Rokok")+" · "+(p.name||"baris "+p.row)
+      +" · Rp "+Number(p.price).toLocaleString("id-ID");
+    const meta=document.createElement("div");meta.className="product-meta";
+    meta.textContent="Baris "+p.row+" · "+(p.event||"riwayat")+
+      " · sumber: "+(p.source||"tidak tercatat")+(p.target?" · tujuan: "+p.target:"");
+    item.append(header,meta);
+    const restore=document.createElement("button");
+    restore.type="button";restore.className="secondary-button";
+    restore.textContent="JADWALKAN ULANG HARGA INI";
+    restore.addEventListener("click",async()=>{
+      try{
+        if(!adminSessionAuthenticated)throw new Error("Masuk Admin menggunakan PIN.");
+        const confirm=document.getElementById("sellingPriceRestoreConfirm");
+        if(!confirm||!confirm.checked)throw new Error("Centang konfirmasi pemulihan harga dahulu.");
+        const g=SELLING_PRICE_GROUPS[p.group],row=Number(p.row),price=Number(p.price);
+        if(!g||!Number.isInteger(row)||row<g.start||row>g.end||
+           !Number.isSafeInteger(price)||price<=0)throw new Error("Catatan harga tidak valid.");
+        const refName=document.getElementById("sellingSourceSheet")?.value;
+        const actualName=await Excel.run(async ctx=>{
+          const sh=ctx.workbook.worksheets.getItem(refName);
+          const cell=sh.getRange("A"+row);cell.load("values");await ctx.sync();
+          return String(cell.values[0][0]||"").trim();
+        });
+        if(!actualName)throw new Error("Nama barang di sheet referensi kosong.");
+        if(p.name && sellingName(p.name)!==sellingName(actualName))
+          throw new Error("Nama barang catatan tidak sama dengan sheet referensi.");
+        const next=sellingPriceQueue().filter(x=>!(x.group===p.group&&Number(x.row)===row));
+        const restored={source:refName,group:p.group,row,name:actualName,price,savedAt:Date.now(),
+          id:scheduledPriceId(refName,p.group,row)};
+        next.push(restored);
+        recordPriceAudit("dipulihkan",restored);
+        setSetting(PRICE_QUEUE_BACKUP_KEY,next);
+        setSetting(PRICE_PENDING_KEY,next);
+        await saveSettings();
+        confirm.checked=false;renderPriceAudit();renderSellingPriceRows();updatePendingPricesStatus();
+        setSellingStatus("Harga "+actualName+" Rp "+price.toLocaleString("id-ID")+
+          " sudah kembali menjadi PENDING. Sheet belum diubah; gunakan pemulihan sheet aktif atau buat shift berikutnya.");
+      }catch(e){setSellingStatus("GAGAL MEMULIHKAN: "+errText(e),true);}
+    });
+    item.appendChild(restore);container.appendChild(item);
+  }
+}
+
 function numericSellingPrice(value){
   const n=Number(value);
   return Number.isFinite(n)?n:NaN;
@@ -137,6 +227,7 @@ async function loadSellingPriceRows(){
   sellingEditorRows=rows;
   renderSellingPriceRows();
   updatePendingPricesStatus();
+  renderPriceAudit();
 }
 
 function renderSellingPriceRows(){
@@ -189,8 +280,11 @@ function renderSellingPriceRows(){
         const clean=sellingPriceQueue().filter(p=>!(p.group===sellingEditorCategory && Number(p.row)===item.row));
         clean.push({source:sellingEditorSheet,group:sellingEditorCategory,row:item.row,
           name:item.name,price,savedAt:Date.now(),id:key});
+        recordPriceAudit("dijadwalkan",clean[clean.length-1]);
+        setSetting(PRICE_QUEUE_BACKUP_KEY,clean);
         setSetting(PRICE_PENDING_KEY,clean);
         await saveSettings();
+        renderPriceAudit();
         setSellingStatus(item.displayName+": harga Rp "+price.toLocaleString("id-ID")
           +" DIJADWALKAN untuk sheet sesudah '"+sellingEditorSheet+"'. Sheet saat ini tetap.");
         renderSellingPriceRows();
@@ -207,10 +301,13 @@ function renderSellingPriceRows(){
         try{
           if(!adminSessionAuthenticated)throw new Error("Masuk sebagai admin.");
           const clean=sellingPriceQueue().filter(p=>scheduledPriceId(p.source,p.group,p.row)!==found.id);
+          recordPriceAudit("dibatalkan",found);
+          setSetting(PRICE_QUEUE_BACKUP_KEY,clean);
           setSetting(PRICE_PENDING_KEY,clean);
           await saveSettings();
           renderSellingPriceRows();
           updatePendingPricesStatus();
+          renderPriceAudit();
           setSellingStatus("Harga pending "+item.displayName+" dibatalkan.");
         }catch(e){setSellingStatus(errText(e),true);}
       });
@@ -333,17 +430,21 @@ async function applyNextShiftPricing(context,newSheet,sourceName,purchaseData){
   return {applied,skipped,alerts};
 }
 
-async function consumeEffectivePrices(applied, targetName){
+async function consumeEffectivePrices(applied,targetName){
   if(!applied||!applied.length)return;
-  // Do not consume a newer edit scheduled while Excel was creating the sheet.
-  const rest=sellingPriceQueue().filter(p=>!applied.some(a=>
+  const original=sellingPriceQueue();
+  const used=original.filter(p=>applied.some(a=>
     a.group===p.group&&Number(a.row)===Number(p.row)&&
-    Number(p.savedAt||0)<=Number(a.savedAt||0)
-  ));
-  setSetting(PRICE_PENDING_KEY,rest);
+    Number(p.savedAt||0)===Number(a.savedAt||0)&&Number(p.price)===Number(a.price)));
+  const rest=original.filter(p=>!used.includes(p));
+  // Save an audit and the last queue snapshot before removing applied prices.
+  for(const p of used)recordPriceAudit("diterapkan",p,{target:targetName});
+  setSetting(PRICE_QUEUE_BACKUP_KEY,original);
   setSetting(PRICE_LAST_APPLIED_KEY,{target:targetName,applied,at:Date.now()});
+  setSetting(PRICE_PENDING_KEY,rest);
   await saveSettings();
   updatePendingPricesStatus();
+  renderPriceAudit();
 }
 
 async function applyPendingPricesToActiveSheet(){
@@ -405,6 +506,7 @@ function initSellingPriceEditor(){
   const recovery=document.getElementById("sellingRepairNowBtn");
   if(recovery)recovery.addEventListener("click",applyPendingPricesToActiveSheet);
   updatePendingPricesStatus();
+  renderPriceAudit();
   source.addEventListener("change",()=>loadSellingPriceRows().catch(e=>setSellingStatus(errText(e),true)));
   cat.addEventListener("change",()=>loadSellingPriceRows().catch(e=>setSellingStatus(errText(e),true)));
   search.addEventListener("input",renderSellingPriceRows);
