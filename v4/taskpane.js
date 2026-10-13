@@ -160,6 +160,10 @@ function startSecurityUi(){
     const enabled=getSetting(CFG.enabled)===true, saved=getSetting(CFG.secret);
     if(enabled&&saved){
       secret=saved;
+      // Ask Office to reopen this task pane with this workbook when the
+      // existing sideloaded add-in remains registered in the browser.
+      // This does NOT sideload missing manifests and NEVER unprotects a sheet.
+      configureDocumentAutoShow().catch(()=>{});
       setConfigured(true);
       setFormEnabled(true);
       try{
@@ -178,6 +182,13 @@ function startSecurityUi(){
     }
     else{ setConfigured(false); setFormEnabled(false); setGlobalUnlockUi(false); setSecurityStatus("Belum diaktifkan. Buat PIN admin terlebih dahulu.",true); }
   });
+}
+
+async function configureDocumentAutoShow(){
+  const key="Office.AutoShowTaskpaneWithDocument";
+  if(getSetting(key)===true)return;
+  setSetting(key,true);
+  await saveSettings();
 }
 
 async function setupSecurity(){
