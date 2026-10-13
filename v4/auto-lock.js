@@ -118,8 +118,35 @@ function waitAndWrapShiftCreate() {
 
       const previousCreate = createNewDaySheet;
       createNewDaySheet = async function(person, sheetName, purchaseData) {
-        const result = await previousCreate(person, sheetName, purchaseData);
-        if(!getSetting(SHIFT_SHEET_ID_KEY) || String(getSetting(SHIFT_SHEET_NAME_KEY))!==String(sheetName)) await registerNewShiftWorkWindow(sheetName);
+        // Take a snapshot before any inner wrapper can clear settings.
+        const scheduledPrices=(typeof getNextShiftPriceChanges==="function")
+          ? getNextShiftPriceChanges().map(item=>({...item}))
+          : [];
+        const result=await previousCreate(person,sheetName,purchaseData);
+        if(!getSetting(SHIFT_SHEET_ID_KEY) || String(getSetting(SHIFT_SHEET_NAME_KEY))!==String(sheetName))
+          await registerNewShiftWorkWindow(sheetName);
+        if(scheduledPrices.length && typeof verifyAndFinalizeNextShiftPricing==="function"){
+          try{
+            const outcome=await verifyAndFinalizeNextShiftPricing(sheetName,scheduledPrices);
+            if(outcome.skipped.length){
+              setSecurityStatus("SHEET BARU BERHASIL dibuat. "+outcome.verified+
+                " harga otomatis terverifikasi, "+outcome.skipped.length+
+                " harga BELUM berlaku karena nama/baris tidak cocok: "+
+                outcome.skipped.join("; ")+". Periksa Menu Admin.",true);
+            }else{
+              setSecurityStatus("SHEET BARU BERHASIL dibuat. "+outcome.verified+
+                " harga jual shift baru diterapkan dan DIVERIFIKASI otomatis"+
+                (outcome.repaired?" ("+outcome.repaired+" dikoreksi setelah pembuatan).":".")+
+                " Tidak perlu klik tombol pemulihan manual.",false);
+            }
+          }catch(e){
+            // The worksheet already exists; avoid encouraging employees to
+            // press Create again and accidentally create duplicate shifts.
+            setSecurityStatus("SHEET BARU sudah dibuat, tetapi penerapan harga otomatis BELUM berhasil: "+
+              (e&&e.message||String(e))+
+              ". Harga pending tetap disimpan. Jangan buat sheet baru lagi; gunakan Menu Admin untuk perbaikan.",true);
+          }
+        }
         return result;
       };
 
