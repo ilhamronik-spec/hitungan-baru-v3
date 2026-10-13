@@ -32,7 +32,13 @@ function localPriceBackupKey(){
     if(typeof localStorage==="undefined"||typeof Office==="undefined")return "";
     const url=String(Office.context?.document?.url||"").trim();
     if(!url)return "";
-    const scope=new URL(url).origin+new URL(url).pathname;
+    // Keep a stable workbook identifier, even when session tokens change.
+    // If Office does not expose a unique file identifier, do not store a
+    // device backup under a shared generic URL.
+    const identifier=url.match(/[?&](?:resid|sourcedoc|fileid|id)=([^&#]+)/i);
+    const pathname=url.split(/[?#]/)[0];
+    if(!identifier && !/\.(xlsx|xlsm|xlsb)(?:$|[?#])/i.test(url))return "";
+    const scope=pathname+(identifier?"|"+identifier[1]:"");
     let h=2166136261;
     for(let i=0;i<scope.length;i++){h^=scope.charCodeAt(i);h=Math.imul(h,16777619);}
     return "hitunganV4.prices.v57."+(h>>>0).toString(16);
