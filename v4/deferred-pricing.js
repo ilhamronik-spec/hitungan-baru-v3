@@ -3,7 +3,8 @@
 // Prices are staged for the next sheet created from the selected SOURCE sheet.
 // Historical/current sheets are never changed by saving a scheduled price.
 const PRICE_PENDING_KEY="hitunganV4.pendingSellingPricesV1";
-const PRICE_EDITOR_BUILD="5.7.0";
+const PRICE_EDITOR_BUILD="5.8.0";
+const PRICE_LAST_VERIFIED_KEY="hitunganV4.priceLastVerifiedV2";
 const PRICE_AUDIT_KEY="hitunganV4.priceAuditV2";
 const PRICE_QUEUE_BACKUP_KEY="hitunganV4.priceQueueBackupV2";
 const PRICE_AUDIT_LIMIT=300;
@@ -192,12 +193,18 @@ function updatePendingPricesStatus(){
   if(!el)return;
   const list=getNextShiftPriceChanges();
   const completed=getSetting(PRICE_LAST_APPLIED_KEY);
+  const verified=getSetting(PRICE_LAST_VERIFIED_KEY);
   el.textContent=list.length?
     list.length+" perubahan harga MENUNGGU sheet berikutnya. Berlaku pada sheet yang dibuat setelah penjadwalan; tidak harus dari sheet sumber yang dipilih."
     : (completed && completed.target?
        "Tidak ada harga pending. Terakhir diterapkan pada sheet: "+completed.target+
         " ("+(Array.isArray(completed.applied)?completed.applied.length:0)+" barang).":
        "Tidak ada perubahan harga yang menunggu shift berikutnya.");
+  const report=document.getElementById("sellingAutomaticStatus");
+  if(report)report.textContent=verified && verified.target
+    ?"Terakhir diperiksa otomatis: "+verified.target+" — "+verified.count+
+     " harga terverifikasi, "+verified.repaired+" diperbaiki sesudah pembuatan sheet."
+    :"Harga pending akan diterapkan dan diperiksa otomatis ketika karyawan membuat sheet baru.";
 }
 
 async function loadSellingPriceSheets(){
@@ -491,6 +498,92 @@ async function consumeEffectivePrices(applied,targetName){
   writeLocalPriceBackup(original);
   updatePendingPricesStatus();
   renderPriceAudit();
+}
+
+// Called by the OUTERMOST shift-creation wrapper only after all creation,
+// stock display transfers and shift timers finish. It verifies the actual
+// final worksheet values before consuming any scheduled change.
+async function verifyAndFinalizeNextShiftPricing(sheetName, scheduledSnapshot){
+  const queue=Array.isArray(scheduledSnapshot)?scheduledSnapshot.filter(x=>x&&SELLING_PRICE_GROUPS[x.group]):[];
+  if(!queue.length)return {verified:0,repaired:0,skipped:[]};
+  const pw=requireSecret();
+  const result=await Excel.run(async context=>{
+    const sheet=context.workbook.worksheets.getActiveWorksheet();
+    sheet.load("id,name,protection/protected");
+    const probes=queue.map(change=>{
+      const cfg=SELLING_PRICE_GROUPS[change.group];
+      const name=sheet.getRange("A"+change.row);
+      const price=sheet.getRange(cfg.sellColumn+change.row);
+      name.load("values");price.load("values");
+      return {change,name,price};
+    });
+    await context.sync();
+    if(sheet.name!==sheetName)throw new Error("Sheet baru tidak cocok. Harus '"+sheetName+"', sekarang '"+sheet.name+"'.");
+    const valid=[];
+    const skipped=[];
+    for(const row of probes){
+      const cfg=SELLING_PRICE_GROUPS[row.change.group];
+      const actualName=String(row.name.values[0][0]??"");
+      if(!cfg || Number(row.change.row)<cfg.start || Number(row.change.row)>cfg.end ||
+         sheet.name===row.change.source ||
+         sellingName(actualName)!==sellingName(row.change.name)){
+        skipped.push(row.change.name+" (nama, baris, atau sheet tidak cocok)");
+        continue;
+      }
+      valid.push(row);
+    }
+    const missed=valid.filter(row=>Number(row.price.values[0][0])!==Number(row.change.price));
+    if(missed.length){
+      const originalProtected=Boolean(sheet.protection.protected);
+      if(originalProtected){
+        sheet.protection.unprotect(pw);
+        await context.sync();
+      }
+      let problem=null;
+      try{
+        for(const row of missed){
+          row.price.values=[[Number(row.change.price)]];
+        }
+        sheet.calculate(true);
+        await context.sync();
+        for(const row of missed)row.price.load("values");
+        await context.sync();
+        for(const row of missed){
+          if(Number(row.price.values[0][0])!==Number(row.change.price)){
+            throw new Error("Excel belum menyimpan harga "+row.change.name+
+              " di "+SELLING_PRICE_GROUPS[row.change.group].sellColumn+row.change.row);
+          }
+        }
+      }catch(e){problem=e;}
+      // Do not turn an open or unlocked workbook into another protection mode.
+      if(originalProtected&&!isGlobalUnlockMode()){
+        const id=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+        const until=Number(getSetting("hitunganV4.shiftWorkUntil"));
+        if(String(sheet.id)===id&&until>Date.now())workingLock(sheet,pw);
+        else fullLock(sheet,pw);
+        await context.sync();
+      }
+      if(problem)throw problem;
+    }
+    // Readback all accepted price cells one final time.
+    for(const row of valid)row.price.load("values");
+    await context.sync();
+    for(const row of valid){
+      if(Number(row.price.values[0][0])!==Number(row.change.price))
+        throw new Error("Verifikasi akhir harga '"+row.change.name+"' gagal.");
+    }
+    return {applied:valid.map(row=>({
+      group:row.change.group,row:Number(row.change.row),
+      price:Number(row.change.price),savedAt:Number(row.change.savedAt||0),
+      id:row.change.id
+    })),repaired:missed.length,skipped};
+  });
+  if(result.applied.length)await consumeEffectivePrices(result.applied,sheetName);
+  setSetting(PRICE_LAST_VERIFIED_KEY,{target:sheetName,at:Date.now(),
+    count:result.applied.length,repaired:result.repaired,skipped:result.skipped});
+  await saveSettings();
+  updatePendingPricesStatus();
+  return {verified:result.applied.length,repaired:result.repaired,skipped:result.skipped};
 }
 
 async function applyPendingPricesToActiveSheet(){
