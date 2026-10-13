@@ -6,14 +6,14 @@
     <title>Hitungan Baru Aman V4</title>
     <link rel="stylesheet" href="./taskpane.css?v=5.4.0" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./taskpane.js?v=5.6.0" defer></script>
+    <script src="./taskpane.js?v=5.8.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
     <script src="./display-transfer.js?v=2" defer></script>
-    <script src="./auto-lock.js?v=7" defer></script>
+    <script src="./auto-lock.js?v=8" defer></script>
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
     <script src="./mines-mask-recovery.js?v=5.5.0" defer></script>
-    <script src="./deferred-pricing.js?v=5.7.2" defer></script>
+    <script src="./deferred-pricing.js?v=5.8.0" defer></script>
     <script src="./margin-colors.js?v=1.2.0" defer></script>
   </head>
   <body>
@@ -21,7 +21,7 @@
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 5.7</h1>
+          <h1>Hitungan Baru Aman V4 · 5.8</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -110,9 +110,10 @@
         <button id="refreshSellingPrices" class="secondary-button" type="button">Muat Daftar Harga</button>
         <p id="sellingPriceStatus" class="security-note" aria-live="polite">Pilih sheet referensi untuk menjadwalkan perubahan harga.</p>
         <p id="sellingPendingSummary" class="security-note selling-price-build" aria-live="polite">Memeriksa harga pending...</p>
+        <p id="sellingAutomaticStatus" class="security-note" aria-live="polite">Harga pending diperiksa otomatis saat sheet baru selesai dibuat.</p>
         <details class="security-card">
-          <summary>Pemulihan harga untuk sheet yang sudah dibuat</summary>
-          <p class="security-note">Buka sheet baru yang harga jualnya belum berubah. Perbaikan ini hanya berlaku pada sheet yang sedang aktif, bukan sheet referensi, dan tidak mengubah harga dasar.</p>
+          <summary>Pemulihan MANUAL — hanya untuk sheet lama yang harganya tidak berubah</summary>
+          <p class="security-note">Harga dijadwalkan akan berubah OTOMATIS pada proses pembuatan sheet baru berikutnya. Gunakan tombol di bawah hanya untuk sheet yang sudah terlanjur dibuat dan harga belum sesuai. Jangan membuat sheet baru lagi hanya untuk memperbaiki harga.</p>
           <label style="display:flex; align-items:start; gap:8px; font-weight:normal">
             <input id="sellingRepairConfirm" type="checkbox" />
             Saya sudah membuka sheet tujuan yang benar dan menyetujui perubahan harga jual pada sheet tersebut.
