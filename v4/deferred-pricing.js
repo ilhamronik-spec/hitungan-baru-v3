@@ -24,6 +24,37 @@ function sellingPriceQueue(){
   return Array.isArray(raw)?raw.filter(p=>p&&typeof p==="object"):[];
 }
 
+// Optional second copy on the device that entered the prices. This is never
+// used to edit a worksheet automatically; an admin must explicitly restore.
+// Avoid mixing unrelated workbooks by requiring a document URL identity.
+function localPriceBackupKey(){
+  try{
+    if(typeof localStorage==="undefined"||typeof Office==="undefined")return "";
+    const url=String(Office.context?.document?.url||"").trim();
+    if(!url)return "";
+    const scope=new URL(url).origin+new URL(url).pathname;
+    let h=2166136261;
+    for(let i=0;i<scope.length;i++){h^=scope.charCodeAt(i);h=Math.imul(h,16777619);}
+    return "hitunganV4.prices.v57."+(h>>>0).toString(16);
+  }catch(_){return "";}
+}
+function writeLocalPriceBackup(items){
+  const key=localPriceBackupKey();
+  if(!key)return;
+  try{
+    localStorage.setItem(key,JSON.stringify({savedAt:Date.now(),queue:items,
+      audit:priceAuditHistory().slice(-120)}));
+  }catch(_){/* Browser storage may be disabled. Workbook settings remain primary. */}
+}
+function readLocalPriceBackup(){
+  const key=localPriceBackupKey();
+  if(!key)return null;
+  try{
+    const o=JSON.parse(localStorage.getItem(key)||"null");
+    return o&&typeof o==="object"?o:null;
+  }catch(_){return null;}
+}
+
 function priceAuditHistory(){
   const raw=getSetting(PRICE_AUDIT_KEY);
   return Array.isArray(raw)?raw.filter(x=>x&&typeof x==="object"):[];
@@ -41,6 +72,11 @@ function priceRecoveryCandidates(){
   const backup=getSetting(PRICE_QUEUE_BACKUP_KEY);
   if(Array.isArray(backup))for(const p of backup)if(p&&p.group)all.push({...p,event:"cadangan"});
   for(const p of priceAuditHistory())if(p&&p.group)all.push(p);
+  const local=readLocalPriceBackup();
+  if(local){
+    if(Array.isArray(local.queue))for(const p of local.queue)if(p&&p.group)all.push({...p,event:"cadangan-perangkat"});
+    if(Array.isArray(local.audit))for(const p of local.audit)if(p&&p.group)all.push({...p,event:p.event||"riwayat-perangkat"});
+  }
   const legacy=getSetting(PRICE_LAST_APPLIED_KEY);
   if(legacy&&Array.isArray(legacy.applied)){
     for(const p of legacy.applied)all.push({...p,name:p.name||"",source:p.source||"",
@@ -101,6 +137,7 @@ function renderPriceAudit(){
         setSetting(PRICE_QUEUE_BACKUP_KEY,next);
         setSetting(PRICE_PENDING_KEY,next);
         await saveSettings();
+        writeLocalPriceBackup(next);
         confirm.checked=false;renderPriceAudit();renderSellingPriceRows();updatePendingPricesStatus();
         setSellingStatus("Harga "+actualName+" Rp "+price.toLocaleString("id-ID")+
           " sudah kembali menjadi PENDING. Sheet belum diubah; gunakan pemulihan sheet aktif atau buat shift berikutnya.");
@@ -284,6 +321,7 @@ function renderSellingPriceRows(){
         setSetting(PRICE_QUEUE_BACKUP_KEY,clean);
         setSetting(PRICE_PENDING_KEY,clean);
         await saveSettings();
+        writeLocalPriceBackup(clean);
         renderPriceAudit();
         setSellingStatus(item.displayName+": harga Rp "+price.toLocaleString("id-ID")
           +" DIJADWALKAN untuk sheet sesudah '"+sellingEditorSheet+"'. Sheet saat ini tetap.");
@@ -305,6 +343,7 @@ function renderSellingPriceRows(){
           setSetting(PRICE_QUEUE_BACKUP_KEY,clean);
           setSetting(PRICE_PENDING_KEY,clean);
           await saveSettings();
+          writeLocalPriceBackup(clean);
           renderSellingPriceRows();
           updatePendingPricesStatus();
           renderPriceAudit();
@@ -443,6 +482,7 @@ async function consumeEffectivePrices(applied,targetName){
   setSetting(PRICE_LAST_APPLIED_KEY,{target:targetName,applied,at:Date.now()});
   setSetting(PRICE_PENDING_KEY,rest);
   await saveSettings();
+  writeLocalPriceBackup(original);
   updatePendingPricesStatus();
   renderPriceAudit();
 }
