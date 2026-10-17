@@ -6,10 +6,10 @@
     <title>Hitungan Baru Aman V4</title>
     <link rel="stylesheet" href="./taskpane.css?v=5.4.0" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-    <script src="./taskpane.js?v=5.9.0" defer></script>
+    <script src="./taskpane.js?v=6.0.0" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
-    <script src="./display-transfer.js?v=2" defer></script>
-    <script src="./auto-lock.js?v=8" defer></script>
+    <script src="./display-transfer.js?v=6.0.0" defer></script>
+    <script src="./auto-lock.js?v=6.0.0" defer></script>
     <!-- Historical-sheet fail-safe is merged into mines-mask-recovery.js to avoid competing locks. -->
     <script src="./shift-lock-fix.js?v=2" defer></script>
     <script src="./mines-mask-recovery.js?v=5.5.0" defer></script>
@@ -21,7 +21,7 @@
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 5.9</h1>
+          <h1>Hitungan Baru Aman V4 · 6.0</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -133,6 +133,12 @@
         <div id="sellingPriceRows" class="product-list" aria-label="Daftar harga lengkap per operator"></div>
       </section>
 
+      <section class="security-card" id="rokokTransferAuditPanel">
+        <h2>Audit Transfer Rokok Gudang → Display</h2>
+        <p class="security-note">Khusus Rokok. Memeriksa jumlah yang dimasukkan ke kolom F dan mencatat transfer per sheet, tanpa menambah stok dua kali. Paket tidak diubah.</p>
+        <p id="rokokTransferAuditStatus" class="security-note" aria-live="polite">Memeriksa riwayat transfer Rokok...</p>
+        <button type="button" id="rokokTransferAuditBtn" class="secondary-button">PERIKSA / PULIHKAN TRANSFER ROKOK DI SHEET AKTIF</button>
+      </section>
       <section class="security-card" id="marginColorsPanel" aria-label="Warna margin barang">
         <h2>Warna Margin Paket dan Rokok</h2>
         <p class="security-note">Otomatis memberi warna pada nama barang kolom A. Paket: margin C − B. Rokok: langsung dari margin kolom E. Berlaku pula untuk sheet lama.</p>
