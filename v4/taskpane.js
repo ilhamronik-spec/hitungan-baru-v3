@@ -39,13 +39,16 @@ function installWrappers(){
        typeof HB_FORMULA_GUARD_BUILD==="undefined"){
       throw new Error("Pembuatan sheet DIBLOKIR: mesin Pengaman Rumus belum termuat. Tutup dan buka ulang add-in.");
     }
-    await hbVerifySourceFormulas(true);
+    const formulaAudit=await hbVerifySourceFormulas(true);
     const pw=requireSecret();
     let sourceName="";
     await Excel.run(async c=>{
       const wb=c.workbook, src=wb.worksheets.getActiveWorksheet();
-      wb.protection.load("protected"); src.load("name,protection/protected");
+      wb.protection.load("protected"); src.load("id,name,protection/protected");
       await c.sync(); sourceName=src.name;
+      if(String(src.id)!==String(formulaAudit.sheetId)){
+        throw new Error("Sheet aktif berubah setelah pemeriksaan rumus. Pilih sheet sumber dan ulangi pembuatan.");
+      }
       if(wb.protection.protected) wb.protection.unprotect(pw);
       if(src.protection.protected) src.protection.unprotect(pw);
       await c.sync();
