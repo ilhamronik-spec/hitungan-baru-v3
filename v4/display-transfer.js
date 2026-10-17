@@ -369,9 +369,11 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
         if(originallyProtected){sheet.protection.unprotect(pw);await ctx.sync();}
         for(const {item,cell} of needsWrite)cell.values=[[item.expected]];
         await ctx.sync(); // Values must persist before recalculating formulas.
-        sheet.calculate(true);
-        await ctx.sync();
       }
+      // Also recalculate when F is already correct but G was stale because
+      // Excel had not refreshed the sheet's dependent stock formulas.
+      sheet.calculate(true);
+      await ctx.sync();
       for(const {cell,ending} of targets){cell.load("values");ending.load("values");}
       await ctx.sync();
       for(const {item,cell,ending} of targets){
