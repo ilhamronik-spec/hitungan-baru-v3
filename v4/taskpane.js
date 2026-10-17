@@ -12,6 +12,7 @@ const LOCK_RANGES = [
 let secret = null;
 let relockTimer = null;
 let v2Loaded = false;
+let shiftCreationInProgress = false;
 let adminSessionAuthenticated = false;
 
 loadV2();
@@ -28,6 +29,9 @@ function installWrappers(){
   if(typeof createNewDaySheet!=="function") return setSecurityStatus("Fungsi V2 tidak ditemukan.",true);
   const originalCreate=createNewDaySheet;
   createNewDaySheet=async function(person,sheetName,purchaseData){
+    if(shiftCreationInProgress)throw new Error("Pembuatan sheet lain masih berlangsung. Tunggu sampai selesai.");
+    shiftCreationInProgress=true;
+    try{
     const pw=requireSecret();
     let sourceName="";
     await Excel.run(async c=>{
@@ -111,6 +115,9 @@ function installWrappers(){
     }catch(err){
       await failClosedRecovery(sourceName,sheetName,pw);
       throw err;
+    }
+    }finally{
+      shiftCreationInProgress=false;
     }
   };
 
