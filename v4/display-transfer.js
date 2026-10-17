@@ -234,12 +234,6 @@ function waitAndWrapCreateNewDay() {
 
       const securedCreateNewDay = createNewDaySheet;
       createNewDaySheet = async function(person, sheetName, purchaseData) {
-        const unresolved=readRokokTransferAudit().filter(entry=>entry.status!=="verified");
-        if(unresolved.length){
-          throw new Error("TRANSFER ROKOK BELUM TERVERIFIKASI pada sheet "+
-            unresolved.map(x=>x.target).join(", ")+
-            ". Pembuatan shift baru ditahan untuk mencegah selisih stok. Admin harus periksa / pulihkan transfer pada sheet tersebut dahulu.");
-        }
         let sourceName = "";
 
         await Excel.run(async (context) => {
@@ -257,7 +251,7 @@ function waitAndWrapCreateNewDay() {
             await applyDisplayTransfersToNewSheet(sheetName, transfers, sourceName);
           } catch (e) {
             showDisplayTransferMessage(displayErrorText(e),true);
-            throw new Error(`Sheet "${sheetName}" sudah dibuat tetapi pindah stok Rokok ke display belum terverifikasi: ${displayErrorText(e)}. JANGAN buat sheet lagi; gunakan Admin > Audit Transfer Rokok.`);
+            throw new Error(`Sheet "${sheetName}" sudah dibuat tetapi pindah stok Rokok ke display belum terverifikasi: ${displayErrorText(e)}. JANGAN buat sheet lagi; periksa stok pada sheet yang sudah dibuat sebelum melanjutkan.`);
           }
         }
 
@@ -413,29 +407,6 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
   renderRokokTransferAudit();
   showDisplayTransferMessage(finalRows.length+" jenis Rokok masuk display dan stok F sudah diverifikasi.",false);
 }
-async function retryRokokTransferAudit(){
-  try{
-    if(typeof adminSessionAuthenticated==="undefined"||!adminSessionAuthenticated)
-      throw new Error("Masuk Menu Admin menggunakan PIN.");
-    const sh=await Excel.run(async ctx=>{
-      const sheet=ctx.workbook.worksheets.getActiveWorksheet();
-      sheet.load("name");await ctx.sync();return sheet.name;
-    });
-    const journal=getRokokTransferAudit(sh);
-    if(!journal)throw new Error("Tidak ada catatan transfer Rokok pada sheet "+sh+". Tidak boleh menambah stok tanpa data sumber.");
-    await applyDisplayTransfersToNewSheet(sh,journal.rows.map(r=>({row:r.row,name:r.name,qty:r.qty})),journal.source);
-    renderRokokTransferAudit();
-  }catch(e){
-    const status=document.getElementById("rokokTransferAuditStatus");
-    if(status)status.textContent="BELUM BERHASIL — "+displayErrorText(e);
-  }
-}
-Office.onReady(info=>{
-  if(info.host!==Office.HostType.Excel)return;
-  const btn=document.getElementById("rokokTransferAuditBtn");
-  if(btn)btn.addEventListener("click",retryRokokTransferAudit);
-  renderRokokTransferAudit();
-});
 
 function resetDisplayTransferDrafts() {
   displayTransferState.open = false;
