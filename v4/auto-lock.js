@@ -25,6 +25,9 @@ let shiftWorkRelockTimer = null;
 let shiftCreateWrapped = false;
 let shiftWrapTimer = null;
 let shiftUiTimer = null;
+let shiftAutoLockBusy = false;
+let shiftAutoLockRetryTimer = null;
+const SHIFT_AUTOLOCK_RETRY_MS = 20000;
 
 function persistentAdminUnlockActive() {
   if (typeof isGlobalUnlockMode === "function") return isGlobalUnlockMode();
@@ -42,12 +45,76 @@ Office.onReady((info) => {
 
   restoreGlobalUnlockWindow().catch(() => {});
   restoreAdminSheetAutoLock().catch(() => {});
-  restoreShiftWorkWindow().catch(() => {});
+  restoreShiftWorkWindow().catch((e) => shiftSecurityError("Pemulihan timer shift", e));
 
   if (shiftUiTimer) clearInterval(shiftUiTimer);
-  shiftUiTimer = setInterval(() => refreshShiftUi().catch(() => {}), 30000);
-  setTimeout(() => refreshShiftUi().catch(() => {}), 800);
+  shiftUiTimer = setInterval(() => {
+    auditShiftAutoLock().catch(e => shiftSecurityError("Pemeriksaan Full Lock",e));
+  }, 30000);
+  setTimeout(() => auditShiftAutoLock().catch(e => shiftSecurityError("Pemeriksaan awal",e)), 1100);
 });
+
+function shiftSecurityError(label,e){
+  const reason=e&&e.message?e.message:String(e||"Kesalahan tidak diketahui");
+  if(typeof setSecurityStatus==="function")
+    setSecurityStatus(label+" belum selesai: "+reason+". Sistem akan mencoba lagi; jangan anggap sheet sudah FULL LOCK.",true);
+}
+function scheduleShiftAutoLockRetry(delay=SHIFT_AUTOLOCK_RETRY_MS){
+  if(shiftAutoLockRetryTimer)clearTimeout(shiftAutoLockRetryTimer);
+  shiftAutoLockRetryTimer=setTimeout(()=>{
+    shiftAutoLockRetryTimer=null;
+    auditShiftAutoLock().catch(e=>shiftSecurityError("Percobaan penguncian ulang",e));
+  },delay);
+}
+async function auditShiftAutoLock(){
+  if(typeof getSetting!=="function"||typeof requireSecret!=="function")return;
+  const id=getSetting(SHIFT_SHEET_ID_KEY);
+  const until=Number(getSetting(SHIFT_UNTIL_KEY));
+  // Proactively recover from an expired timer, including after browser sleep.
+  if(id && (!Number.isFinite(until)||Date.now()>=until)){
+    await expireShiftWorkWindow();
+  }else if(id){
+    scheduleShiftWorkRelock(until);
+  }else if(!persistentAdminUnlockActive()){
+    await failCloseUntrackedLatestShift();
+  }
+  if(persistentAdminUnlockActive() && typeof restoreGlobalUnlockWindow==="function"){
+    await restoreGlobalUnlockWindow();
+  }
+  if(typeof refreshShiftUi==="function")await refreshShiftUi();
+}
+// A legacy sheet may have been created before the timer was registered.
+// It must never remain writable indefinitely simply because the timer key
+// is absent. Only a work-mode sheet (A1 unlocked) is treated as orphaned.
+async function failCloseUntrackedLatestShift(){
+  const adminUntil=Number(getSetting(ADMIN_UNLOCK_UNTIL_KEY));
+  if(Number.isFinite(adminUntil)&&adminUntil>Date.now())return;
+  const pw=requireSecret();
+  const result=await Excel.run(async ctx=>{
+    const sh=ctx.workbook.worksheets.getItemAt(0);
+    const wb=ctx.workbook;
+    sh.load("name,protection/protected");
+    wb.protection.load("protected");
+    const marker=sh.getRange("A1");
+    marker.format.protection.load("locked");
+    await ctx.sync();
+    if(sh.protection.protected && marker.format.protection.locked===true)return null;
+    if(sh.protection.protected){
+      sh.protection.unprotect(pw);
+      await ctx.sync();
+    }
+    fullLock(sh,pw);
+    if(!wb.protection.protected)wb.protection.protect(pw);
+    await ctx.sync();
+    sh.protection.load("protected");
+    marker.format.protection.load("locked");
+    await ctx.sync();
+    if(!sh.protection.protected || marker.format.protection.locked!==true)
+      throw new Error("Full Lock sheet tanpa timer gagal diverifikasi.");
+    return sh.name;
+  });
+  if(result)shiftSecurityError("Sheet "+result+" tidak mempunyai timer 2,5 jam; sheet diamankan FULL LOCK",new Error("Minta admin periksa riwayat pembuatan sheet."));
+}
 
 function bindAdminUnlockSafety() {
   const unlockBtn = document.getElementById("adminUnlockSheetBtn");
@@ -217,48 +284,66 @@ function scheduleShiftWorkRelock(until) {
   if (shiftWorkRelockTimer) clearTimeout(shiftWorkRelockTimer);
   const delay = Math.max(0, Number(until) - Date.now());
   shiftWorkRelockTimer = setTimeout(() => {
-    expireShiftWorkWindow().catch(() => {});
+    auditShiftAutoLock().catch(e=>{
+      shiftSecurityError("Timer 2,5 jam",e);
+      scheduleShiftAutoLockRetry();
+    });
   }, delay);
 }
 
 async function expireShiftWorkWindow() {
-  if (persistentAdminUnlockActive()) return;
-  const sheetId = getSetting(SHIFT_SHEET_ID_KEY);
-  const sheetName = getSetting(SHIFT_SHEET_NAME_KEY) || "sheet";
-  const until = Number(getSetting(SHIFT_UNTIL_KEY));
-  if (!sheetId) return;
-
-  if (Number.isFinite(until) && Date.now() < until) {
+  if(shiftAutoLockBusy)return;
+  const sheetId=getSetting(SHIFT_SHEET_ID_KEY);
+  if(!sheetId)return;
+  const until=Number(getSetting(SHIFT_UNTIL_KEY));
+  if(Number.isFinite(until)&&until>Date.now()){
     scheduleShiftWorkRelock(until);
     return;
   }
-
-  try {
-    const pw = requireSecret();
-    const result = await Excel.run(async (context) => {
-      const wb = context.workbook;
-      const sh = wb.worksheets.getItem(sheetId);
+  // An admin's temporary unlock must not prevent the shift deadline. Retry
+  // as soon as the 90-minute admin window is over, without clearing the shift.
+  if(persistentAdminUnlockActive()){
+    scheduleShiftAutoLockRetry();
+    return;
+  }
+  shiftAutoLockBusy=true;
+  const sheetName=getSetting(SHIFT_SHEET_NAME_KEY)||"sheet";
+  try{
+    const pw=requireSecret();
+    const result=await Excel.run(async ctx=>{
+      const wb=ctx.workbook,sh=wb.worksheets.getItem(sheetId);
       sh.load("name,protection/protected");
       wb.protection.load("protected");
-      await context.sync();
-
-      if (sh.protection.protected) {
-        sh.protection.unprotect(pw);
-        await context.sync();
+      const proof=sh.getRange("A1");
+      proof.format.protection.load("locked");
+      await ctx.sync();
+      // Protected alone does not mean full lock. WorkingLock also protects.
+      if(!sh.protection.protected || proof.format.protection.locked!==true){
+        if(sh.protection.protected){
+          sh.protection.unprotect(pw);
+          await ctx.sync();
+        }
+        fullLock(sh,pw);
       }
-
-      fullLock(sh, pw);
-      if (!wb.protection.protected) wb.protection.protect(pw);
-      await context.sync();
+      if(!wb.protection.protected)wb.protection.protect(pw);
+      await ctx.sync();
+      sh.protection.load("protected");
+      proof.format.protection.load("locked");
+      await ctx.sync();
+      if(!sh.protection.protected || proof.format.protection.locked!==true)
+        throw new Error("Excel belum mengonfirmasi FULL LOCK; penguncian akan diulang.");
       return sh.name;
     });
-
     await clearShiftWorkWindowState();
+    if(shiftAutoLockRetryTimer)clearTimeout(shiftAutoLockRetryTimer);
+    shiftAutoLockRetryTimer=null;
     await refreshShiftUi();
-    setSecurityStatus(`BATAS WAKTU SELESAI — sheet "${result}" otomatis FULL LOCK setelah 2,5 jam. Hanya admin/PIN yang dapat menjadikannya sheet kerja lagi.`, false);
-  } catch (e) {
-    // Pertahankan state agar V4 mencoba lagi saat panel dibuka berikutnya.
-    setSecurityStatus(`AUTO-LOCK 2,5 jam belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
+    setSecurityStatus('FULL LOCK TERVERIFIKASI — sheet "'+result+'" sudah ditutup setelah batas 2,5 jam.',false);
+  }catch(e){
+    shiftSecurityError('AUTO-LOCK 2,5 jam "'+sheetName+'"',e);
+    scheduleShiftAutoLockRetry();
+  }finally{
+    shiftAutoLockBusy=false;
   }
 }
 
@@ -366,9 +451,10 @@ async function clearShiftWindowIfItsSheetIsFullLocked() {
       await context.sync();
       return sh.protection.protected;
     });
-    if (state) {
-      await clearShiftWorkWindowState();
-      await refreshShiftUi();
+    // WorkingLock is also protected. Do not clear the timer merely because
+    // Excel reports "protected"; leave the expiry timestamp in place.
+    if(state && getSetting(SHIFT_UNTIL_KEY) && Date.now()>=Number(getSetting(SHIFT_UNTIL_KEY))){
+      await expireShiftWorkWindow();
     }
   } catch (_) {}
 }
