@@ -234,6 +234,12 @@ function waitAndWrapCreateNewDay() {
 
       const securedCreateNewDay = createNewDaySheet;
       createNewDaySheet = async function(person, sheetName, purchaseData) {
+        const unresolved=readRokokTransferAudit().filter(entry=>entry.status!=="verified");
+        if(unresolved.length){
+          throw new Error("TRANSFER ROKOK BELUM TERVERIFIKASI pada sheet "+
+            unresolved.map(x=>x.target).join(", ")+
+            ". Pembuatan shift baru ditahan untuk mencegah selisih stok. Admin harus periksa / pulihkan transfer pada sheet tersebut dahulu.");
+        }
         let sourceName = "";
 
         await Excel.run(async (context) => {
