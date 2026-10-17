@@ -300,12 +300,12 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
   if(!Array.isArray(transfers)||!transfers.length)return;
   const pw=requireSecret();
   const existing=getRokokTransferAudit(sheetName);
-  if(existing&&existing.status==="verified"){
-    if(existing.source!==sourceName||
-       transfers.some(x=>!existing.rows.some(y=>y.row===x.row&&y.qty===x.qty)))
-      throw new Error("Transfer Rokok ke sheet ini sudah tercatat; jumlah berbeda. Hubungi admin.");
-    return;
-  }
+  if(existing&&existing.status==="verified"&&
+     (existing.source!==sourceName ||
+      transfers.some(x=>!existing.rows.some(y=>y.row===x.row&&y.qty===x.qty))))
+    throw new Error("Transfer Rokok ke sheet ini sudah tercatat; jumlah berbeda. Hubungi admin.");
+  // Always read Excel again, even for a previously verified transfer.
+  // A cached verification must not hide a later workbook synchronization error.
   let planned=existing;
   if(!planned){
     planned=await Excel.run(async ctx=>{
@@ -315,17 +315,20 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
         const cell=sheet.getRange("F"+item.row);
         cell.load("values");
         const name=sheet.getRange("A"+item.row);name.load("values");
-        return {item,cell,name};
+        const ending=sheet.getRange("G"+item.row);ending.load("values");
+        return {item,cell,name,ending};
       });
       await ctx.sync();
       if(sheet.name!==sheetName)
         throw new Error('Sheet tujuan berubah. Harus "'+sheetName+'", aktif "'+sheet.name+'".');
       return {target:sheetName,source:sourceName,createdAt:Date.now(),status:"pending",
-        rows:values.map(({item,cell,name})=>{
+        rows:values.map(({item,cell,name,ending})=>{
           const before=displayNumber(cell.values[0][0]);
           if(String(name.values[0][0]||"").trim()!==String(item.name).trim())
             throw new Error("Nama Rokok di sheet tujuan berbeda pada baris "+item.row+".");
-          return {row:item.row,name:item.name,qty:item.qty,before,expected:before+item.qty};
+          const displayBefore=ending.values[0][0];
+          return {row:item.row,name:item.name,qty:item.qty,before,expected:before+item.qty,
+            displayBefore:(typeof displayBefore==="number"&&Number.isFinite(displayBefore))?displayBefore:null};
         })};
     });
     await saveRokokTransferAudit(planned);
@@ -338,7 +341,8 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
     const targets=planned.rows.map(item=>{
       const cell=sheet.getRange("F"+item.row);cell.load("values");
       const name=sheet.getRange("A"+item.row);name.load("values");
-      return {item,cell,name};
+      const ending=sheet.getRange("G"+item.row);ending.load("values");
+      return {item,cell,name,ending};
     });
     await ctx.sync();
     for(const {item,cell,name} of targets){
@@ -362,12 +366,22 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
         sheet.calculate(true);
         await ctx.sync();
       }
-      for(const {cell} of targets)cell.load("values");
+      for(const {cell,ending} of targets){cell.load("values");ending.load("values");}
       await ctx.sync();
-      for(const {item,cell} of targets){
+      for(const {item,cell,ending} of targets){
         if(displayNumber(cell.values[0][0])!==item.expected)
           throw new Error("Stok display Rokok F"+item.row+" belum sesuai: diharapkan "+
             item.expected+", terbaca "+cell.values[0][0]+".");
+        // G is the display ending from the existing workbook formula.
+        // Do not rewrite formulas; detect if the input is not reflected.
+        const displayAfter=ending.values[0][0];
+        if(typeof item.displayBefore==="number" &&
+           typeof displayAfter==="number" && Number.isFinite(displayAfter) &&
+           displayAfter!==item.displayBefore+item.qty){
+          throw new Error("Rokok "+item.name+" sudah dicatat pada F"+item.row+
+            " tetapi hitungan display G"+item.row+" belum bertambah "+
+            item.qty+". Periksa rumus workbook; jangan tambah stok ulang.");
+        }
       }
     }catch(e){failure=e;}
     finally{
