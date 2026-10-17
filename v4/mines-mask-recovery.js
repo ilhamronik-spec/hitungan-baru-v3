@@ -150,6 +150,13 @@ async function restoreActiveShiftMines(){
 }
 
 async function reconcileMinesMasks(manual=false){
+  // Don't re-apply black masking in the middle of an authenticated
+  // BUKA SEMUA SHEET operation before the global-unlock flag is saved.
+  if(typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy){
+    updateMinesRecoveryStatus("Menunggu pembukaan semua sheet oleh Admin...",false);
+    scheduleMinesRecovery(9000);
+    return;
+  }
   if(minesRecoveryBusy){
     if(manual) updateMinesRecoveryStatus("Pemeriksaan sedang berjalan; tunggu hasilnya.",false);
     return;
@@ -179,7 +186,8 @@ async function reconcileMinesMasks(manual=false){
     const failed=[];
     const pw=requireSecret();
     for(const entry of targets){
-      if(isGlobalUnlockMode())break;
+      if(isGlobalUnlockMode()||
+         (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy))break;
       try {
         if(await maskOneClosedSheet(entry,pw)==="masked")completed++;
       }catch(e){
