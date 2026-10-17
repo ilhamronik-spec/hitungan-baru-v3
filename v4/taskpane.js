@@ -417,11 +417,13 @@ async function adminSync(){
 }
 
 async function adminUnlockAllSheets(){
+  let operationStarted=false;
   try{
     await checkPin();
     const pw=requireSecret();
     setSecurityStatus("ADMIN: membuka sheet dan menampilkan kembali angka mines…",false);
     adminGlobalUnmaskBusy=true;
+    operationStarted=true;
     try{
       await Excel.run(async c=>{
         const wb=c.workbook,sheets=wb.worksheets;
@@ -448,7 +450,20 @@ async function adminUnlockAllSheets(){
     }
     setGlobalUnlockUi(true);
     setSecurityStatus("ADMIN BEBAS — SEMUA SHEET TERBUKA maksimal 1,5 jam. Tidak ada auto-lock sampai admin memilih KUNCI SEMUA KEMBALI.",false);
-  }catch(e){setSecurityStatus(errText(e),true);}
+  }catch(e){
+    if(operationStarted){
+      // Partial Excel failure must not leave the workbook unlocked indefinitely.
+      try{
+        await lockAllSheetsCore();
+      }catch(relockError){
+        setSecurityStatus("GAGAL membuka seluruh sheet DAN mengunci ulang: "+errText(relockError)+
+          ". Segera amankan workbook dari perangkat Admin.",true);
+        return;
+      }
+    }
+    setSecurityStatus("Gagal membuka seluruh sheet: "+errText(e)+
+      ". Penguncian sheet sudah dipulihkan.",true);
+  }
 }
 
 async function adminLockAllSheets(){
