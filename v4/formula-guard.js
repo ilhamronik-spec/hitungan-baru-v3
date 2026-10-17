@@ -213,7 +213,7 @@ async function hbPaintFormulaIssues(result){
   if(!starts.length&&!restores.length&&!marked.length)return;
   const colors=await Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(result.sheetId);
-    const inspect=starts.map(address=>{
+    const inspect=[...new Set(starts.concat(marked))].map(address=>{
       const range=sh.getRange(address);
       range.format.fill.load("color");
       range.format.font.load("color");
@@ -225,13 +225,24 @@ async function hbPaintFormulaIssues(result){
       font:hbFormulaColorReadSafe(range.format.font.color)
     }));
   });
+  const toRepaint=colors.filter(color=>
+    marked.includes(color.address) &&
+    (String(color.fill||"").toUpperCase()!==HB_FORMULA_GUARD_BLACK ||
+     String(color.font||"").toUpperCase()!==HB_FORMULA_GUARD_RED)
+  ).map(color=>color.address);
+  const toPaint=[...new Set(starts.concat(toRepaint))];
+  if(!toPaint.length&&!restores.length)return;
   // Persist original colors BEFORE editing Excel so a refresh can restore them.
   const entry={name:result.sheetName,cells:{...recorded}};
-  for(const color of colors)entry.cells[color.address]={fill:color.fill,font:color.font};
-  previous[result.sheetId]=entry;
-  setSetting(HB_FORMULA_GUARD_JOURNAL_KEY,previous);
-  await saveSettings();
-  const toPaint=[...new Set(starts.concat(marked))];
+  for(const color of colors){
+    if(starts.includes(color.address))
+      entry.cells[color.address]={fill:color.fill,font:color.font};
+  }
+  if(starts.length){
+    previous[result.sheetId]=entry;
+    setSetting(HB_FORMULA_GUARD_JOURNAL_KEY,previous);
+    await saveSettings();
+  }
   await Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(result.sheetId);
     sh.load("id,protection/protected");
