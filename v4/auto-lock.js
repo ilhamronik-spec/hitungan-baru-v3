@@ -87,6 +87,7 @@ async function auditShiftAutoLock(){
 // It must never remain writable indefinitely simply because the timer key
 // is absent. Only a work-mode sheet (A1 unlocked) is treated as orphaned.
 async function failCloseUntrackedLatestShift(){
+  if(typeof shiftCreationInProgress!=="undefined" && shiftCreationInProgress)return;
   const adminUntil=Number(getSetting(ADMIN_UNLOCK_UNTIL_KEY));
   if(Number.isFinite(adminUntil)&&adminUntil>Date.now())return;
   const pw=requireSecret();
@@ -113,7 +114,8 @@ async function failCloseUntrackedLatestShift(){
       throw new Error("Full Lock sheet tanpa timer gagal diverifikasi.");
     return sh.name;
   });
-  if(result)shiftSecurityError("Sheet "+result+" tidak mempunyai timer 2,5 jam; sheet diamankan FULL LOCK",new Error("Minta admin periksa riwayat pembuatan sheet."));
+  if(result)setSecurityStatus('PENGAMAN: Sheet "'+result+
+    '" tidak mempunyai timer tersimpan. Sheet telah FULL LOCK untuk mencegah akses tanpa batas. Admin perlu memeriksa riwayat shift.',true);
 }
 
 function bindAdminUnlockSafety() {
@@ -440,23 +442,24 @@ async function clearShiftWorkWindowState() {
   await saveSettings();
 }
 
-async function clearShiftWindowIfItsSheetIsFullLocked() {
-  const sheetId = getSetting(SHIFT_SHEET_ID_KEY);
-  if (!sheetId) return;
-
-  try {
-    const state = await Excel.run(async (context) => {
-      const sh = context.workbook.worksheets.getItem(sheetId);
+async function clearShiftWindowIfItsSheetIsFullLocked(){
+  const id=getSetting(SHIFT_SHEET_ID_KEY);
+  if(!id)return;
+  try{
+    const full=await Excel.run(async ctx=>{
+      const sh=ctx.workbook.worksheets.getItem(id);
       sh.load("protection/protected");
-      await context.sync();
-      return sh.protection.protected;
+      const marker=sh.getRange("A1");
+      marker.format.protection.load("locked");
+      await ctx.sync();
+      return sh.protection.protected&&marker.format.protection.locked===true;
     });
-    // WorkingLock is also protected. Do not clear the timer merely because
-    // Excel reports "protected"; leave the expiry timestamp in place.
-    if(state && getSetting(SHIFT_UNTIL_KEY) && Date.now()>=Number(getSetting(SHIFT_UNTIL_KEY))){
-      await expireShiftWorkWindow();
+    // Only manually confirmed FULL LOCK can cancel an unexpired timer.
+    if(full){
+      await clearShiftWorkWindowState();
+      await refreshShiftUi();
     }
-  } catch (_) {}
+  }catch(e){shiftSecurityError("Periksa Full Lock manual",e);}
 }
 
 // ---------------- Admin temporary unlock safety (15 minutes) ----------------
