@@ -15,6 +15,8 @@ const displayTransferState = {
 
 let displayTransferWrapped = false;
 let displayWrapTimer = null;
+const ROKOK_DISPLAY_AUDIT_KEY="hitunganV4.rokokDisplayTransferAuditV1";
+const ROKOK_DISPLAY_AUDIT_MAX=45;
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
@@ -246,9 +248,10 @@ function waitAndWrapCreateNewDay() {
 
         if (transfers.length) {
           try {
-            await applyDisplayTransfersToNewSheet(sheetName, transfers);
+            await applyDisplayTransfersToNewSheet(sheetName, transfers, sourceName);
           } catch (e) {
-            throw new Error(`Sheet "${sheetName}" sudah dibuat, tetapi tambah stok display gagal: ${displayErrorText(e)} Jangan buat sheet baru lagi; buka Admin/Koreksi.`);
+            showDisplayTransferMessage(displayErrorText(e),true);
+            throw new Error(`Sheet "${sheetName}" sudah dibuat tetapi pindah stok Rokok ke display belum terverifikasi: ${displayErrorText(e)}. JANGAN buat sheet lagi; gunakan Admin > Audit Transfer Rokok.`);
           }
         }
 
@@ -265,42 +268,152 @@ function waitAndWrapCreateNewDay() {
   }, 250);
 }
 
-async function applyDisplayTransfersToNewSheet(sheetName, transfers) {
-  const pw = requireSecret();
 
-  await Excel.run(async (context) => {
-    const sheet = context.workbook.worksheets.getActiveWorksheet();
-    sheet.load("name,protection/protected");
-
-    const targetRanges = transfers.map((item) => {
-      const range = sheet.getRange(`F${item.row}`);
-      range.load("values");
-      return { item, range };
-    });
-
-    await context.sync();
-
-    if (sheet.name !== sheetName) {
-      throw new Error(`Sheet aktif berubah menjadi "${sheet.name}".`);
-    }
-
-    if (sheet.protection.protected) {
-      sheet.protection.unprotect(pw);
-      await context.sync();
-    }
-
-    targetRanges.forEach(({ item, range }) => {
-      const current = displayNumber(range.values[0][0]);
-      range.values = [[current + item.qty]];
-    });
-
-    sheet.calculate(true);
-    if (typeof isGlobalUnlockMode !== "function" || !isGlobalUnlockMode()) {
-      workingLock(sheet, pw);
-    }
-    await context.sync();
-  });
+function readRokokTransferAudit(){
+  const raw=typeof getSetting==="function"?getSetting(ROKOK_DISPLAY_AUDIT_KEY):null;
+  return Array.isArray(raw)?raw.filter(x=>x&&typeof x==="object"):[];
 }
+async function saveRokokTransferAudit(entry){
+  if(typeof setSetting!=="function"||typeof saveSettings!=="function")
+    throw new Error("Mesin penyimpanan audit stok belum siap.");
+  const all=readRokokTransferAudit().filter(x=>x.target!==entry.target);
+  all.push(entry);
+  setSetting(ROKOK_DISPLAY_AUDIT_KEY,all.slice(-ROKOK_DISPLAY_AUDIT_MAX));
+  await saveSettings();
+}
+function getRokokTransferAudit(target){
+  return readRokokTransferAudit().find(x=>x.target===target)||null;
+}
+function renderRokokTransferAudit(){
+  const el=document.getElementById("rokokTransferAuditStatus");
+  if(!el)return;
+  const rows=readRokokTransferAudit().slice(-5).reverse();
+  el.textContent=rows.length?rows.map(x=>
+    x.target+": "+(x.status==="verified"?"TERVERIFIKASI":"PERLU DIPERIKSA")+
+    " ("+x.rows.length+" barang, "+x.rows.reduce((s,r)=>s+Number(r.qty||0),0)+" pcs)"
+  ).join(" | "):"Belum ada catatan transfer Rokok versi terbaru.";
+}
+// A target-specific journal is written BEFORE any F-cell changes. If Excel
+// rejects a later operation, retry checks baseline vs expected to prevent
+// silently applying the same transfer twice.
+async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
+  if(!Array.isArray(transfers)||!transfers.length)return;
+  const pw=requireSecret();
+  const existing=getRokokTransferAudit(sheetName);
+  if(existing&&existing.status==="verified"){
+    if(existing.source!==sourceName||
+       transfers.some(x=>!existing.rows.some(y=>y.row===x.row&&y.qty===x.qty)))
+      throw new Error("Transfer Rokok ke sheet ini sudah tercatat; jumlah berbeda. Hubungi admin.");
+    return;
+  }
+  let planned=existing;
+  if(!planned){
+    planned=await Excel.run(async ctx=>{
+      const sheet=ctx.workbook.worksheets.getActiveWorksheet();
+      sheet.load("id,name");
+      const values=transfers.map(item=>{
+        const cell=sheet.getRange("F"+item.row);
+        cell.load("values");
+        const name=sheet.getRange("A"+item.row);name.load("values");
+        return {item,cell,name};
+      });
+      await ctx.sync();
+      if(sheet.name!==sheetName)
+        throw new Error('Sheet tujuan berubah. Harus "'+sheetName+'", aktif "'+sheet.name+'".');
+      return {target:sheetName,source:sourceName,createdAt:Date.now(),status:"pending",
+        rows:values.map(({item,cell,name})=>{
+          const before=displayNumber(cell.values[0][0]);
+          if(String(name.values[0][0]||"").trim()!==String(item.name).trim())
+            throw new Error("Nama Rokok di sheet tujuan berbeda pada baris "+item.row+".");
+          return {row:item.row,name:item.name,qty:item.qty,before,expected:before+item.qty};
+        })};
+    });
+    await saveRokokTransferAudit(planned);
+  }
+  if(planned.source!==sourceName)
+    throw new Error("Sumber transfer tidak sama dengan catatan sebelumnya.");
+  const finalRows=await Excel.run(async ctx=>{
+    const sheet=ctx.workbook.worksheets.getItem(planned.target);
+    sheet.load("id,name,protection/protected");
+    const targets=planned.rows.map(item=>{
+      const cell=sheet.getRange("F"+item.row);cell.load("values");
+      const name=sheet.getRange("A"+item.row);name.load("values");
+      return {item,cell,name};
+    });
+    await ctx.sync();
+    for(const {item,cell,name} of targets){
+      if(String(name.values[0][0]||"").trim()!==String(item.name).trim())
+        throw new Error("Nama Rokok berubah pada baris "+item.row+". Transfer dihentikan.");
+      const current=displayNumber(cell.values[0][0]);
+      if(current!==item.before && current!==item.expected)
+        throw new Error("F"+item.row+" berubah menjadi "+current+
+          "; diharapkan "+item.before+" atau "+item.expected+
+          ". Jangan tambah dua kali; periksa manual.");
+    }
+    const needsWrite=targets.filter(({item,cell})=>
+      displayNumber(cell.values[0][0])===item.before && item.expected!==item.before);
+    const originallyProtected=sheet.protection.protected;
+    let failure=null;
+    try{
+      if(needsWrite.length){
+        if(originallyProtected){sheet.protection.unprotect(pw);await ctx.sync();}
+        for(const {item,cell} of needsWrite)cell.values=[[item.expected]];
+        await ctx.sync(); // Values must persist before recalculating formulas.
+        sheet.calculate(true);
+        await ctx.sync();
+      }
+      for(const {cell} of targets)cell.load("values");
+      await ctx.sync();
+      for(const {item,cell} of targets){
+        if(displayNumber(cell.values[0][0])!==item.expected)
+          throw new Error("Stok display Rokok F"+item.row+" belum sesuai: diharapkan "+
+            item.expected+", terbaca "+cell.values[0][0]+".");
+      }
+    }catch(e){failure=e;}
+    finally{
+      if(needsWrite.length && !isGlobalUnlockMode()){
+        // Restore the timed shift's working protection. If its 2.5-hour
+        // window has expired, close as FULL LOCK instead.
+        const id=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+        const until=Number(getSetting("hitunganV4.shiftWorkUntil"));
+        const active=String(sheet.id)===id&&Number.isFinite(until)&&Date.now()<until;
+        if(active)workingLock(sheet,pw);
+        else fullLock(sheet,pw);
+        await ctx.sync();
+      }
+    }
+    if(failure)throw failure;
+    return targets.map(({item})=>({row:item.row,qty:item.qty,expected:item.expected}));
+  });
+  planned.status="verified";
+  planned.verifiedAt=Date.now();
+  await saveRokokTransferAudit(planned);
+  renderRokokTransferAudit();
+  showDisplayTransferMessage(finalRows.length+" jenis Rokok masuk display dan stok F sudah diverifikasi.",false);
+}
+async function retryRokokTransferAudit(){
+  try{
+    if(typeof adminSessionAuthenticated==="undefined"||!adminSessionAuthenticated)
+      throw new Error("Masuk Menu Admin menggunakan PIN.");
+    const sh=await Excel.run(async ctx=>{
+      const sheet=ctx.workbook.worksheets.getActiveWorksheet();
+      sheet.load("name");await ctx.sync();return sheet.name;
+    });
+    const journal=getRokokTransferAudit(sh);
+    if(!journal)throw new Error("Tidak ada catatan transfer Rokok pada sheet "+sh+". Tidak boleh menambah stok tanpa data sumber.");
+    await applyDisplayTransfersToNewSheet(sh,journal.rows.map(r=>({row:r.row,name:r.name,qty:r.qty})),journal.source);
+    renderRokokTransferAudit();
+  }catch(e){
+    const status=document.getElementById("rokokTransferAuditStatus");
+    if(status)status.textContent="BELUM BERHASIL — "+displayErrorText(e);
+  }
+}
+Office.onReady(info=>{
+  if(info.host!==Office.HostType.Excel)return;
+  const btn=document.getElementById("rokokTransferAuditBtn");
+  if(btn)btn.addEventListener("click",retryRokokTransferAudit);
+  renderRokokTransferAudit();
+});
 
 function resetDisplayTransferDrafts() {
   displayTransferState.open = false;
