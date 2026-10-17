@@ -216,7 +216,11 @@ async function hbPaintFormulaIssues(result){
     let unprotected=false,failed=null;
     try{
       if(protectedBefore){
-        sh.protection.unprotect(pw);await ctx.sync();unprotected=true;
+        // Mark before the Office batch is sent: a failed sync may still have
+        // unlocked Excel, and finally MUST attempt to restore protection.
+        unprotected=true;
+        sh.protection.unprotect(pw);
+        await ctx.sync();
       }
       for(const address of toPaint){
         const cell=sh.getRange(address);
@@ -279,12 +283,17 @@ async function hbVerifySourceFormulas(blockCreation=false){
 
 Office.onReady(info=>{
   if(info.host!==Office.HostType.Excel)return;
-  // No new buttons or controls. Passive audit when the add-in is opened.
-  setTimeout(()=>{
-    if(typeof getSetting==="function"&&getSetting("hitunganV4.enabled")===true)
-      hbVerifySourceFormulas(false).catch(e=>{
-        if(typeof setSecurityStatus==="function")
-          setSecurityStatus("Pengaman rumus belum dapat diperiksa: "+e.message,true);
-      });
-  },4500);
+  const passiveAudit=()=>{
+    if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
+    if(typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)return;
+    if(typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)return;
+    hbVerifySourceFormulas(false).catch(e=>{
+      if(typeof setSecurityStatus==="function")
+        setSecurityStatus("Pengaman rumus belum dapat diperiksa: "+e.message,true);
+    });
+  };
+  // Existing panel only: audit on load and then periodically as long as the
+  // panel remains open; no new menus, no workbook formula/value edits.
+  setTimeout(passiveAudit,4500);
+  setInterval(passiveAudit,60000);
 });
