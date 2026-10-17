@@ -14,6 +14,7 @@ let relockTimer = null;
 let v2Loaded = false;
 let shiftCreationInProgress = false;
 let adminSessionAuthenticated = false;
+let adminGlobalUnmaskBusy = false;
 
 loadV2();
 
@@ -233,6 +234,36 @@ const MINES_RECOVERY_NUMBER_FORMAT = '"Rp" #,##0;-"Rp" #,##0;"Rp" 0';
 function minesHasInvisibleNumberFormat(format){
   return typeof format==="string" && format.replace(/\s/g,"")===";;;";
 }
+// Only the authenticated "BUKA SEMUA SHEET" flow calls this.
+// The worksheet's original numeric values/formulas must never be replaced.
+function revealMinusCellsForAdmin(sh){
+  for(const address of MINES_CELLS){
+    const r=sh.getRange(address);
+    r.format.fill.color="#FFFFFF";
+    r.format.font.color="#000000";
+    r.format.protection.formulaHidden=false;
+  }
+}
+async function revealAllMinusCellsForAdmin(ctx,sheets){
+  const cells=[];
+  for(const sh of sheets){
+    for(const address of MINES_CELLS){
+      const cell=sh.getRange(address);
+      cell.load("numberFormat");
+      cells.push(cell);
+    }
+  }
+  await ctx.sync();
+  // Old V4 installations may have added ";;;", which also hides TEXT;
+  // fix only those formats so SmartSDM can read them as well.
+  for(const cell of cells){
+    if(minesHasInvisibleNumberFormat(cell.numberFormat[0][0])){
+      cell.numberFormat=[[MINES_RECOVERY_NUMBER_FORMAT]];
+    }
+  }
+  for(const sh of sheets)revealMinusCellsForAdmin(sh);
+  await ctx.sync();
+}
 function maskMinusCells(sh){
   // VISUAL ONLY: Never replace number formats, values or formulas here.
   for(const address of MINES_CELLS){
@@ -389,21 +420,28 @@ async function adminUnlockAllSheets(){
   try{
     await checkPin();
     const pw=requireSecret();
-    setSecurityStatus("ADMIN: membuka seluruh sheet…",false);
-    await Excel.run(async c=>{
-      const wb=c.workbook,sheets=wb.worksheets;
-      wb.protection.load("protected");
-      sheets.load("items/name,items/protection/protected");
-      await c.sync();
-      for(const sh of sheets.items){
-        if(sh.protection.protected) sh.protection.unprotect(pw);
-      }
-      // Struktur workbook tetap dikunci; yang dibuka maksimal 1,5 jam hanyalah seluruh worksheet.
-      if(!wb.protection.protected) wb.protection.protect(pw);
-      await c.sync();
-    });
-    setSetting(CFG.globalUnlock,true);
-    await saveSettings();
+    setSecurityStatus("ADMIN: membuka sheet dan menampilkan kembali angka mines…",false);
+    adminGlobalUnmaskBusy=true;
+    try{
+      await Excel.run(async c=>{
+        const wb=c.workbook,sheets=wb.worksheets;
+        wb.protection.load("protected");
+        sheets.load("items/name,items/protection/protected");
+        await c.sync();
+        for(const sh of sheets.items){
+          if(sh.protection.protected)sh.protection.unprotect(pw);
+        }
+        await c.sync();
+        await revealAllMinusCellsForAdmin(c,sheets.items);
+        // Keep workbook STRUCTURE protected; only sheet access is opened.
+        if(!wb.protection.protected)wb.protection.protect(pw);
+        await c.sync();
+      });
+      setSetting(CFG.globalUnlock,true);
+      await saveSettings();
+    }finally{
+      adminGlobalUnmaskBusy=false;
+    }
     await beginGlobalUnlockWindow();
     if(typeof clearAdminSheetAutoLockState==="function"){
       try{await clearAdminSheetAutoLockState();}catch(_){}
@@ -437,6 +475,8 @@ async function lockAllSheetsCore(statusOverride){
       for(const sh of sheets.items){
         if(sh.protection.protected) sh.protection.unprotect(pw);
         if(validShift&&String(sh.id)===String(shiftId)){
+          // Current shift remains readable while its normal input window lasts.
+          revealMinusCellsForAdmin(sh);
           workingLock(sh,pw);
           workingName=sh.name;
         }else{
@@ -460,7 +500,7 @@ async function lockAllSheetsCore(statusOverride){
         : "MODE NORMAL — seluruh sheet sudah FULL LOCK dan struktur workbook terkunci kembali."),
       false
     );
-  }catch(e){setSecurityStatus(errText(e),true);}
+  }catch(e){setSecurityStatus(errText(e),true);throw e;}
 }
 
 async function ensureAllSheetsUnlocked(){
@@ -471,9 +511,10 @@ async function ensureAllSheetsUnlocked(){
     sheets.load("items/protection/protected");
     await c.sync();
     for(const sh of sheets.items){
-      if(sh.protection.protected) sh.protection.unprotect(pw);
+      if(sh.protection.protected)sh.protection.unprotect(pw);
     }
     await c.sync();
+    await revealAllMinusCellsForAdmin(c,sheets.items);
   });
 }
 
