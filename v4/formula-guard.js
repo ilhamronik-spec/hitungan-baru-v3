@@ -134,7 +134,8 @@ function hbFormulaGuardError(issues,sheetName){
   const prefix='PEMBUATAN SHEET DIBLOKIR — '+issues.length+
     ' kesalahan rumus pada sheet sumber "'+(sheetName||"aktif")+'".';
   return prefix+"\nLOKASI KESALAHAN:\n"+details.join("\n")+
-    (remainder?"\n... dan "+remainder+" alamat lainnya.":"")+
+    (remainder?"\nALAMAT TAMBAHAN ("+remainder+"): "+
+      issues.slice(details.length).map(x=>x.address).join(", "):"")+
     "\nSel bermasalah ditandai FILL HITAM dan FONT MERAH."+
     "\nBetulkan rumus pada sheet sumber terlebih dahulu; rumus/stok tidak diperbaiki otomatis.";
 }
