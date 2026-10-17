@@ -118,13 +118,41 @@ function hbFormulaGuardJournal(){
   const raw=getSetting(HB_FORMULA_GUARD_JOURNAL_KEY);
   return raw&&typeof raw==="object"&&!Array.isArray(raw)?JSON.parse(JSON.stringify(raw)):{};
 }
-function hbFormulaGuardError(issues){
-  const codes=issues.slice(0,12).map(x=>x.address).join(", ");
-  return "Pembuatan sheet DIBLOKIR: "+issues.length+" sel rumus tidak sesuai acuan 17 oktober"+
-    " ("+codes+(issues.length>12?", dan lainnya":"")+"). Perbaiki rumus di sheet sumber dahulu."+
-    " Rumus tidak diubah oleh pengaman.";
+function hbFormulaIssueDetail(issue){
+  if(issue.expected===null)
+    return issue.address+" — SEHARUSNYA KOSONG, tetapi sekarang terisi";
+  const actual=issue.actual;
+  if(typeof actual!=="string"||!actual.startsWith("="))
+    return issue.address+" — RUMUS HILANG / DIGANTI ANGKA ATAU TEKS"+
+      (issue.expected.length<=70?" (acuan "+issue.expected+")":"");
+  return issue.address+" — RUMUS BERUBAH DARI POLA / ACUAN"+
+    (issue.expected.length<=70?" (seharusnya "+issue.expected+")":"");
 }
-function hbFormulaCurrentIssueCount(){return HB_FORMULA_REFERENCE.size;}
+function hbFormulaGuardError(issues,sheetName){
+  const details=issues.slice(0,45).map(hbFormulaIssueDetail);
+  const remainder=issues.length-details.length;
+  const prefix='PEMBUATAN SHEET DIBLOKIR — '+issues.length+
+    ' kesalahan rumus pada sheet sumber "'+(sheetName||"aktif")+'".';
+  return prefix+"\nLOKASI KESALAHAN:\n"+details.join("\n")+
+    (remainder?"\n... dan "+remainder+" alamat lainnya.":"")+
+    "\nSel bermasalah ditandai FILL HITAM dan FONT MERAH."+
+    "\nBetulkan rumus pada sheet sumber terlebih dahulu; rumus/stok tidak diperbaiki otomatis.";
+}
+function hbShowFormulaNote(message){
+  if(typeof setSecurityStatus==="function")setSecurityStatus(message,true);
+  // Reuse existing panel/form status. No extra menus or controls.
+  const el=typeof document!=="undefined"?document.getElementById("securityStatus"):null;
+  if(el){
+    el.style.whiteSpace="pre-line";
+    el.style.maxHeight="290px";
+    el.style.overflowY="auto";
+  }
+  const form=typeof document!=="undefined"?document.getElementById("status"):null;
+  if(form){
+    form.textContent=message;
+    form.style.whiteSpace="pre-line";
+  }
+}
 async function hbScanActiveSheetFormulas(){
   const groupRanges=[
     {range:"F6:I75",fromRow:6,fromCol:hbFormulaColumnNumber("F")},
@@ -267,13 +295,17 @@ async function hbVerifySourceFormulas(blockCreation=false){
     let formatFailure=null;
     try{await hbPaintFormulaIssues(result);}catch(e){formatFailure=e;}
     if(result.issues.length){
-      const msg=hbFormulaGuardError(result.issues);
-      if(typeof setSecurityStatus==="function")setSecurityStatus(
-        msg+(formatFailure?" Penandaan warna belum tuntas: "+formatFailure.message:""),true);
-      if(blockCreation)throw new Error(msg+
-        (formatFailure?" Penandaan warna gagal: "+formatFailure.message:""));
+      const msg=hbFormulaGuardError(result.issues,result.sheetName);
+      const notice=msg+(formatFailure?
+        "\nPERINGATAN: Sebagian warna belum berhasil diterapkan ("+formatFailure.message+").":"");
+      hbShowFormulaNote(notice);
+      if(blockCreation)throw new Error(notice);
     }else if(formatFailure){
-      if(blockCreation)throw new Error("Pengaman rumus gagal memulihkan penanda warna: "+formatFailure.message);
+      // Valid source formulas must not be blocked merely because an old
+      // warning color could not be restored by Excel.
+      if(typeof setSecurityStatus==="function")
+        setSecurityStatus("Rumus sumber BENAR, tetapi pemulihan warna peringatan belum selesai: "+
+          formatFailure.message,true);
     }
     return result;
   })();
