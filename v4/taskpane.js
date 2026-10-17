@@ -33,6 +33,13 @@ function installWrappers(){
     if(shiftCreationInProgress)throw new Error("Pembuatan sheet lain masih berlangsung. Tunggu sampai selesai.");
     shiftCreationInProgress=true;
     try{
+    // Validate the SOURCE sheet while it is still locked, before opening
+    // workbook structure or letting V2 clone/calculate another shift.
+    if(typeof hbVerifySourceFormulas!=="function" ||
+       typeof HB_FORMULA_GUARD_BUILD==="undefined"){
+      throw new Error("Pembuatan sheet DIBLOKIR: mesin Pengaman Rumus belum termuat. Tutup dan buka ulang add-in.");
+    }
+    await hbVerifySourceFormulas(true);
     const pw=requireSecret();
     let sourceName="";
     await Excel.run(async c=>{
