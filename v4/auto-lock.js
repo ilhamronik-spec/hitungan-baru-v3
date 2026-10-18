@@ -25,6 +25,9 @@ let shiftWorkRelockTimer = null;
 let shiftCreateWrapped = false;
 let shiftWrapTimer = null;
 let shiftUiTimer = null;
+// Shared across existing V4 modules: delay nonessential background writes
+// until all sheet creation / display-transfer / price checks have finished.
+let hbShiftPipelineBusy = false;
 let shiftAutoLockBusy = false;
 let shiftAutoLockRetryTimer = null;
 const SHIFT_AUTOLOCK_RETRY_MS = 20000;
@@ -75,7 +78,7 @@ async function auditShiftAutoLock(){
     await expireShiftWorkWindow();
   }else if(id){
     scheduleShiftWorkRelock(until);
-  }else if(!persistentAdminUnlockActive()){
+  }else if(!persistentAdminUnlockActive() && !hbShiftPipelineBusy){
     await failCloseUntrackedLatestShift();
   }
   if(persistentAdminUnlockActive() && typeof restoreGlobalUnlockWindow==="function"){
@@ -87,7 +90,8 @@ async function auditShiftAutoLock(){
 // It must never remain writable indefinitely simply because the timer key
 // is absent. Only a work-mode sheet (A1 unlocked) is treated as orphaned.
 async function failCloseUntrackedLatestShift(){
-  if(typeof shiftCreationInProgress!=="undefined" && shiftCreationInProgress)return;
+  if(hbShiftPipelineBusy ||
+     (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress))return;
   const adminUntil=Number(getSetting(ADMIN_UNLOCK_UNTIL_KEY));
   if(Number.isFinite(adminUntil)&&adminUntil>Date.now())return;
   const pw=requireSecret();
@@ -193,6 +197,10 @@ function waitAndWrapShiftCreate() {
 
       const previousCreate = createNewDaySheet;
       createNewDaySheet = async function(person, sheetName, purchaseData) {
+        if(hbShiftPipelineBusy)
+          throw new Error("Pembuatan shift lain masih diproses. Tunggu hingga seluruh stok dan harga selesai disimpan.");
+        hbShiftPipelineBusy=true;
+        try{
         // Take a snapshot before any inner wrapper can clear settings.
         const scheduledPrices=(typeof getNextShiftPriceChanges==="function")
           ? getNextShiftPriceChanges().map(item=>({...item}))
@@ -223,6 +231,9 @@ function waitAndWrapShiftCreate() {
           }
         }
         return result;
+        }finally{
+          hbShiftPipelineBusy=false;
+        }
       };
 
       shiftCreateWrapped = true;
