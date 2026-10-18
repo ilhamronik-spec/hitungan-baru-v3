@@ -43,9 +43,15 @@ function installWrappers(){
     const pw=requireSecret();
     let sourceName="";
     await Excel.run(async c=>{
-      const wb=c.workbook, src=wb.worksheets.getActiveWorksheet();
-      wb.protection.load("protected"); src.load("id,name,protection/protected");
+      const wb=c.workbook, src=wb.worksheets.getActiveWorksheet(),sheets=wb.worksheets;
+      wb.protection.load("protected");
+      src.load("id,name,protection/protected");
+      sheets.load("items/name");
       await c.sync(); sourceName=src.name;
+      if(sheets.items.some(sh=>String(sh.name).trim().toLowerCase()===
+          String(sheetName).trim().toLowerCase())){
+        throw new Error('Sheet "'+sheetName+'" SUDAH ADA. Jangan buat ulang karena dapat menyebabkan stok dan hitungan ganda. Periksa hasil sheet yang sudah terbuat.');
+      }
       if(String(src.id)!==String(formulaAudit.sheetId)){
         throw new Error("PEMBUATAN SHEET DIBLOKIR: sheet aktif '"+src.name+
           "' bukan sheet TERBARU '"+formulaAudit.sheetName+
