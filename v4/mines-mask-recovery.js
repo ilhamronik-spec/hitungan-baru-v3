@@ -58,7 +58,9 @@ async function scanMinesMasks(){
     await c.sync();
     const found=[];
     for(const sh of sheets.items){
-      sh.load("id,name,protection/protected");
+      sh.load("id,name,position,protection/protected");
+      const marker=sh.getRange("A1");
+      marker.format.protection.load("locked");
       const probes=MINES_CELLS.map(address=>{
         const r=sh.getRange(address);
         r.format.fill.load("color");
@@ -66,10 +68,10 @@ async function scanMinesMasks(){
         r.load("numberFormat,values,text");
         return r;
       });
-      found.push({sh,probes});
+      found.push({sh,probes,marker});
     }
     await c.sync();
-    return found.map(({sh,probes})=>{
+    return found.map(({sh,probes,marker})=>{
       const visibleToApps=probes.every(minesCellReadable);
       const fillCorrect=probes.every(r=>
         String(r.format.fill.color||"").toUpperCase()==="#000000"&&
@@ -79,7 +81,11 @@ async function scanMinesMasks(){
         protected:Boolean(sh.protection.protected),
         masked:visibleToApps&&fillCorrect,
         unreadable:!visibleToApps,
-        excluded:excluded.has(String(sh.id))};
+        // A fresh latest worksheet may have no synchronized timer yet.
+        // Protected working-mode sheets are never historical/full-lock targets.
+        excluded:excluded.has(String(sh.id)) ||
+          (Number(sh.position)===0 && sh.protection.protected &&
+           marker.format.protection.locked===false)};
     });
   });
 }
