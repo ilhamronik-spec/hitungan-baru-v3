@@ -314,6 +314,9 @@ async function registerNewShiftWorkWindow(expectedSheetName) {
 }
 
 async function restoreShiftWorkWindow() {
+  // Other devices may have just created/registered a new shift. Refresh
+  // workbook-backed settings before evaluating any cached deadline.
+  await refreshShiftSettingsFromWorkbook();
   const sheetId = getSetting(SHIFT_SHEET_ID_KEY);
   const untilRaw = getSetting(SHIFT_UNTIL_KEY);
 
@@ -356,6 +359,9 @@ function scheduleShiftWorkRelock(until) {
 
 async function expireShiftWorkWindow() {
   if(shiftAutoLockBusy)return;
+  // A stale 2.5h deadline from a previous device/session must not close
+  // a newer shift. Always refresh settings before a real full-lock decision.
+  await refreshShiftSettingsFromWorkbook();
   const sheetId=getSetting(SHIFT_SHEET_ID_KEY);
   if(!sheetId)return;
   const until=Number(getSetting(SHIFT_UNTIL_KEY));
