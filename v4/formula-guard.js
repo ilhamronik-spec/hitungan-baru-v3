@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.2.0";
+const HB_FORMULA_GUARD_BUILD="6.2.4";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
 const HB_FORMULA_GUARD_RED="#FF3030";
@@ -154,6 +154,52 @@ function hbShowFormulaNote(message){
     form.style.whiteSpace="pre-line";
   }
 }
+
+function hbFormulaSummaryText(result,formatFailure){
+  const issues=result.issues||[];
+  const header=issues.length?"HASIL PEMERIKSAAN: "+issues.length+" ANOMALI":"HASIL PEMERIKSAAN: LOLOS";
+  const lines=[
+    header,
+    "Sheet terbaru: "+result.sheetName,
+    "Diperiksa: "+result.checked+" posisi sel | Anomali: "+issues.length,
+    "Acuan tetap: 17 oktober",
+    "Waktu: "+new Date().toLocaleString("id-ID")
+  ];
+  if(issues.length){
+    lines.push("KEPUTUSAN: TIDAK BOLEH membuat sheet baru sampai rumus sheet terbaru benar.");
+    lines.push("LOKASI KESALAHAN:");
+    for(const issue of issues.slice(0,12))lines.push(hbFormulaIssueDetail(issue));
+    if(issues.length>12)
+      lines.push("Sel lain ("+(issues.length-12)+"): "+
+        issues.slice(12).map(x=>x.address).join(", "));
+    const confidential=issues.filter(x=>HB_FORMULA_MINES.has(x.address)).length;
+    lines.push("Penanda: fill HITAM + font MERAH di sel anomali."+
+      (confidential?" "+confidential+" sel mines rahasia hanya ditampilkan merah saat Admin membuka semua sheet.":""));
+  }else{
+    lines.push("KEPUTUSAN: rumus sheet terbaru sesuai pola; pemeriksaan rumus tidak menghalangi pembuatan sheet selanjutnya.");
+  }
+  if(formatFailure)
+    lines.push("PERHATIAN: pengaturan warna belum berhasil/terverifikasi: "+
+      (formatFailure.message||String(formatFailure))+".");
+  return lines.join("\n");
+}
+function hbRenderFormulaSummary(result,formatFailure){
+  const el=typeof document!=="undefined"?document.getElementById("formulaAuditSummary"):null;
+  if(!el)return;
+  const hasIssues=Boolean(result.issues&&result.issues.length);
+  el.textContent=hbFormulaSummaryText(result,formatFailure);
+  el.className="formula-audit-summary "+(hasIssues||formatFailure?"error":"ok");
+}
+function hbRenderFormulaAuditUnavailable(reason){
+  const el=typeof document!=="undefined"?document.getElementById("formulaAuditSummary"):null;
+  if(!el)return;
+  el.className="formula-audit-summary error";
+  el.textContent="PEMERIKSAAN RUMUS BELUM BERHASIL\n"+
+    "Belum ada hasil pemeriksaan yang dapat dipercaya.\n"+
+    "Penyebab: "+(reason&&reason.message||String(reason))+
+    "\nJangan membuat sheet baru sampai pemeriksaan berhasil.";
+}
+
 async function hbScanLatestSheetFormulas(){
   const groupRanges=[
     {range:"F6:I75",fromRow:6,fromCol:hbFormulaColumnNumber("F")},
@@ -315,6 +361,8 @@ async function hbVerifySourceFormulas(blockCreation=false){
     const result=await hbScanLatestSheetFormulas();
     let formatFailure=null;
     try{await hbPaintFormulaIssues(result);}catch(e){formatFailure=e;}
+    // Keep this visible regardless of later workbook-protection status messages.
+    hbRenderFormulaSummary(result,formatFailure);
     if(result.issues.length){
       const msg=hbFormulaGuardError(result.issues,result.sheetName);
       const notice=msg+(formatFailure?
@@ -341,6 +389,7 @@ Office.onReady(info=>{
     if(typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)return;
     if(typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)return;
     hbVerifySourceFormulas(false).catch(e=>{
+      hbRenderFormulaAuditUnavailable(e);
       if(typeof setSecurityStatus==="function")
         setSecurityStatus("Pengaman rumus belum dapat diperiksa: "+e.message,true);
     });
