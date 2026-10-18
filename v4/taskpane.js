@@ -33,6 +33,20 @@ function installWrappers(){
     if(shiftCreationInProgress)throw new Error("Pembuatan sheet lain masih berlangsung. Tunggu sampai selesai.");
     shiftCreationInProgress=true;
     try{
+    // A margin/mines repair might already be running from add-in startup.
+    // Wait for that workbook batch to finish before reading formulas or
+    // unprotecting the source for the V2 copy. Never launch two write paths.
+    for(let attempt=0;attempt<30;attempt++){
+      const maintenanceBusy=
+        (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy)||
+        (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
+        (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy);
+      if(!maintenanceBusy)break;
+      if(attempt===29){
+        throw new Error("Pembuatan sheet BELUM DIMULAI: Excel masih menyelesaikan pemeriksaan warna / penguncian. Tunggu sebentar, lalu coba lagi. Tidak ada sheet baru dibuat.");
+      }
+      await new Promise(resolve=>setTimeout(resolve,600));
+    }
     // Validate the SOURCE sheet while it is still locked, before opening
     // workbook structure or letting V2 clone/calculate another shift.
     if(typeof hbVerifySourceFormulas!=="function" ||
