@@ -208,7 +208,9 @@ async function hbEnsureMarginRules(context,sheet){
 async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
   return Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(entry.name);
-    sh.load("id,name,protection/protected");
+    sh.load("id,name,position,protection/protected");
+    const workingMarker=sh.getRange("A1");
+    workingMarker.format.protection.load("locked");
     await ctx.sync();
     if(String(sh.id)!==String(entry.id))throw new Error("Identitas sheet berubah, batalkan pengeditan.");
     if(isGlobalUnlockMode())return 0;
@@ -216,6 +218,8 @@ async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
     if(excluded.has(String(sh.id))&&!allowTrackedShift)return 0;
     if(await hbMarginRulesInstalled(ctx,sh))return 0;
     const originallyProtected=Boolean(sh.protection.protected);
+    const wasLatestWorking=originallyProtected&&Number(sh.position)===0&&
+      workingMarker.format.protection.locked===false;
     const secretPw=requireSecret();
     if(originallyProtected){
       sh.protection.unprotect(secretPw);
@@ -231,7 +235,14 @@ async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
         // Restore protection even if a format update failed.
         if(originallyProtected){
           const fresh=hbMarginExcludedSheetIds();
-          if(fresh.has(String(sh.id))){
+          // A newest sheet can be in protected working mode while another
+          // device's shift timestamp is still syncing. Never promote it to
+          // FULL LOCK just because settings do not yet contain its ID.
+          const tracked=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
+          const deadline=Number(getSetting("hitunganV4.shiftWorkUntil"));
+          const expiredHere=tracked===String(sh.id)&&
+            Number.isFinite(deadline)&&deadline>0&&deadline<=Date.now();
+          if(fresh.has(String(sh.id))||(wasLatestWorking&&!expiredHere)){
             workingLock(sh,secretPw);
           }else{
             fullLock(sh,secretPw);
