@@ -154,14 +154,23 @@ function hbShowFormulaNote(message){
     form.style.whiteSpace="pre-line";
   }
 }
-async function hbScanActiveSheetFormulas(){
+async function hbScanLatestSheetFormulas(){
   const groupRanges=[
     {range:"F6:I75",fromRow:6,fromCol:hbFormulaColumnNumber("F")},
     {range:"B93:N113",fromRow:93,fromCol:hbFormulaColumnNumber("B")},
     {range:"D178:P239",fromRow:178,fromCol:hbFormulaColumnNumber("D")}
   ];
   return Excel.run(async ctx=>{
-    const sh=ctx.workbook.worksheets.getActiveWorksheet();
+    // The only formula gate is the newest (leftmost, position 0) worksheet.
+    // The user may be viewing a historical tab; it must never become
+    // the formula source merely because it is selected in the UI.
+    const collection=ctx.workbook.worksheets;
+    collection.load("items/id,items/name,items/position");
+    await ctx.sync();
+    if(!collection.items.length)
+      throw new Error("Workbook tidak memiliki sheet untuk diperiksa.");
+    const latest=collection.items.reduce((a,b)=>Number(b.position)<Number(a.position)?b:a);
+    const sh=collection.getItem(latest.id);
     sh.load("id,name,protection/protected");
     const chunks=groupRanges.map(group=>{
       const range=sh.getRange(group.range);
@@ -303,7 +312,7 @@ async function hbVerifySourceFormulas(blockCreation=false){
     // In a concurrent preflight, rescan rather than reusing a stale result.
   }
   const run=(async()=>{
-    const result=await hbScanActiveSheetFormulas();
+    const result=await hbScanLatestSheetFormulas();
     let formatFailure=null;
     try{await hbPaintFormulaIssues(result);}catch(e){formatFailure=e;}
     if(result.issues.length){
@@ -336,8 +345,9 @@ Office.onReady(info=>{
         setSecurityStatus("Pengaman rumus belum dapat diperiksa: "+e.message,true);
     });
   };
-  // Existing panel only: audit on load and then periodically as long as the
-  // panel remains open; no new menus, no workbook formula/value edits.
+  // Audit only the newest worksheet, even if an older tab is selected.
+  // Existing panel only: audit on load and periodically while open.
+  // No new menus, no workbook formula/value edits.
   setTimeout(passiveAudit,4500);
   setInterval(passiveAudit,60000);
 });
