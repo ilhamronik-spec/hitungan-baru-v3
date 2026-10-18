@@ -344,6 +344,21 @@ button:disabled {
 .security-status { font-size:12px; line-height:1.45; }
 .security-status.ok { color:#0b6735; }
 .security-status.error { color:#b42318; }
+.formula-audit-summary {
+  margin-top:10px;
+  padding-top:10px;
+  border-top:1px solid #d1d5db;
+  color:#475569;
+  font-size:12px;
+  line-height:1.55;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  max-height:270px;
+  overflow-y:auto;
+}
+.formula-audit-summary.ok { color:#0b6735; }
+.formula-audit-summary.error { color:#b42318; }
+
 .security-note { margin-top:6px; margin-bottom:8px; color:#5b6472; font-size:12px; line-height:1.4; }
 .security-card summary { cursor:pointer; font-weight:700; }
 .admin-grid { display:grid; gap:6px; margin-top:8px; }
