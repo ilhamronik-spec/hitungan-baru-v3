@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Hitungan Baru Aman V4</title>
-    <link rel="stylesheet" href="./taskpane.css?v=5.4.0" />
+    <link rel="stylesheet" href="./taskpane.css?v=6.2.4" />
     <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     <script src="./taskpane.js?v=6.2.3" defer></script>
-    <script src="./formula-guard.js?v=6.2.3" defer></script>
+    <script src="./formula-guard.js?v=6.2.4" defer></script>
     <script src="./setup-fix.js?v=4.0.2" defer></script>
     <script src="./display-transfer.js?v=6.0.1" defer></script>
     <script src="./auto-lock.js?v=6.2.3" defer></script>
@@ -22,7 +22,7 @@
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 6.2.3</h1>
+          <h1>Hitungan Baru Aman V4 · 6.2.4</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -30,6 +30,7 @@
       <section class="security-card">
         <div class="security-title">Pengaman Workbook</div>
         <div id="securityStatus" class="security-status">Memeriksa proteksi...</div>
+        <div id="formulaAuditSummary" class="formula-audit-summary" role="status" aria-live="polite">Pemeriksaan Rumus — menunggu pembacaan sheet terbaru...</div>
       </section>
 
       <section id="securitySetup" class="security-card" hidden>
