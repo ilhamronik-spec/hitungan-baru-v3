@@ -92,8 +92,14 @@ async function failCloseUntrackedLatestShift(){
   if(Number.isFinite(adminUntil)&&adminUntil>Date.now())return;
   const pw=requireSecret();
   const result=await Excel.run(async ctx=>{
-    const sh=ctx.workbook.worksheets.getItemAt(0);
-    const wb=ctx.workbook;
+    const wb=ctx.workbook,collection=wb.worksheets;
+    // Excel JS has no worksheets.getItemAt(index). Determine the newest
+    // sheet by worksheet.position, then access it by a stable worksheet id.
+    collection.load("items/id,items/name,items/position");
+    await ctx.sync();
+    if(!collection.items.length)return null;
+    const latest=collection.items.reduce((a,b)=>Number(b.position)<Number(a.position)?b:a);
+    const sh=collection.getItem(latest.id);
     sh.load("name,protection/protected");
     wb.protection.load("protected");
     const marker=sh.getRange("A1");
