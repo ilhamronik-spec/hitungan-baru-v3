@@ -47,7 +47,10 @@ function installWrappers(){
       wb.protection.load("protected"); src.load("id,name,protection/protected");
       await c.sync(); sourceName=src.name;
       if(String(src.id)!==String(formulaAudit.sheetId)){
-        throw new Error("Sheet aktif berubah setelah pemeriksaan rumus. Pilih sheet sumber dan ulangi pembuatan.");
+        throw new Error("PEMBUATAN SHEET DIBLOKIR: sheet aktif '"+src.name+
+          "' bukan sheet TERBARU '"+formulaAudit.sheetName+
+          "'. Buka tab '"+formulaAudit.sheetName+
+          "' (paling kiri), lalu ulangi. Hanya rumus sheet terbaru yang diperiksa.");
       }
       if(wb.protection.protected) wb.protection.unprotect(pw);
       if(src.protection.protected) src.protection.unprotect(pw);
