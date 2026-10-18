@@ -270,6 +270,12 @@ async function hbMarginReadSheets(){
 }
 
 async function hbMarginReconcileAll(manual=false){
+  if((typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
+     (typeof hbFormulaAuditBusy!=="undefined"&&hbFormulaAuditBusy)){
+    hbMarginStatus("Menunggu pembuatan shift / pemeriksaan rumus selesai sebelum memeriksa warna.");
+    hbMarginQueueRetry(12000);
+    return;
+  }
   if(hbMarginColorBusy){
     if(manual)hbMarginStatus("Pemeriksaan warna masih berjalan. Tunggu hingga selesai.");
     return;
