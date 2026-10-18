@@ -352,11 +352,13 @@ async function hbPaintFormulaIssues(result){
 }
 
 let hbFormulaRunning=null;
+let hbFormulaAuditBusy=false;
 async function hbVerifySourceFormulas(blockCreation=false){
   if(hbFormulaRunning){
     await hbFormulaRunning;
     // In a concurrent preflight, rescan rather than reusing a stale result.
   }
+  hbFormulaAuditBusy=true;
   const run=(async()=>{
     const result=await hbScanLatestSheetFormulas();
     let formatFailure=null;
@@ -379,24 +381,40 @@ async function hbVerifySourceFormulas(blockCreation=false){
     return result;
   })();
   hbFormulaRunning=run;
-  try{return await run;}finally{if(hbFormulaRunning===run)hbFormulaRunning=null;}
+  try{return await run;}finally{
+    if(hbFormulaRunning===run)hbFormulaRunning=null;
+    hbFormulaAuditBusy=false;
+  }
 }
 
 Office.onReady(info=>{
   if(info.host!==Office.HostType.Excel)return;
+  let attempts=0;
   const passiveAudit=()=>{
     if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
-    if(typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)return;
-    if(typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)return;
+    // Background auditing must not repaint cells while Excel is saving a
+    // newly created worksheet, stock transfers, admin unlocking, or historical
+    // margin/mines repair. The create button still runs a strict preflight.
+    const busy=
+      (typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
+      (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)||
+      (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)||
+      (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
+      (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy)||
+      Boolean(hbFormulaRunning);
+    if(busy){
+      if(++attempts<=8)setTimeout(passiveAudit,10000);
+      else hbRenderFormulaAuditUnavailable(new Error(
+        "Excel sedang menyimpan/memperbarui sheet; periksa lagi dengan membuka ulang add-in, atau saat membuat shift berikutnya."));
+      return;
+    }
     hbVerifySourceFormulas(false).catch(e=>{
       hbRenderFormulaAuditUnavailable(e);
       if(typeof setSecurityStatus==="function")
         setSecurityStatus("Pengaman rumus belum dapat diperiksa: "+e.message,true);
     });
   };
-  // Audit only the newest worksheet, even if an older tab is selected.
-  // Existing panel only: audit on load and periodically while open.
-  // No new menus, no workbook formula/value edits.
-  setTimeout(passiveAudit,4500);
-  setInterval(passiveAudit,60000);
+  // One delayed startup audit, never a recurring background write every
+  // minute. The next shift is always validated immediately before cloning.
+  setTimeout(passiveAudit,11000);
 });
