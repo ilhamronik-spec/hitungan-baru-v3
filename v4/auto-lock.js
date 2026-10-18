@@ -74,10 +74,12 @@ async function auditShiftAutoLock(){
   const id=getSetting(SHIFT_SHEET_ID_KEY);
   const until=Number(getSetting(SHIFT_UNTIL_KEY));
   // Proactively recover from an expired timer, including after browser sleep.
-  if(id && (!Number.isFinite(until)||Date.now()>=until)){
+  if(id && Number.isFinite(until)&&until>0&&Date.now()>=until){
     await expireShiftWorkWindow();
-  }else if(id){
+  }else if(id && Number.isFinite(until)&&until>0){
     scheduleShiftWorkRelock(until);
+  }else if(id){
+    await restoreShiftWorkWindow();
   }else if(!persistentAdminUnlockActive() && !hbShiftPipelineBusy){
     await failCloseUntrackedLatestShift();
   }
@@ -89,43 +91,80 @@ async function auditShiftAutoLock(){
 // A legacy sheet may have been created before the timer was registered.
 // It must never remain writable indefinitely simply because the timer key
 // is absent. Only a work-mode sheet (A1 unlocked) is treated as orphaned.
+let shiftTimerRecoveryBusy=false;
+async function refreshShiftSettingsFromWorkbook(){
+  const settings=Office.context.document.settings;
+  if(typeof settings.refreshAsync!=="function")return false;
+  return new Promise((resolve,reject)=>{
+    settings.refreshAsync(result=>{
+      if(result && result.status===Office.AsyncResultStatus.Succeeded)resolve(true);
+      else reject(result&&result.error||new Error("Pengaturan waktu shift belum tersinkron antarperangkat."));
+    });
+  });
+}
+// Never hard-lock a newly cloned shift merely because this device has not
+// received the timestamp saved by the device that created it.
+// Re-read workbook settings and recover the timer while keeping sensitive
+// cells protected by the existing workingLock.
 async function failCloseUntrackedLatestShift(){
-  if(hbShiftPipelineBusy ||
+  if(shiftTimerRecoveryBusy||hbShiftPipelineBusy||
      (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress))return;
   const adminUntil=Number(getSetting(ADMIN_UNLOCK_UNTIL_KEY));
   if(Number.isFinite(adminUntil)&&adminUntil>Date.now())return;
-  const pw=requireSecret();
-  const result=await Excel.run(async ctx=>{
-    const wb=ctx.workbook,collection=wb.worksheets;
-    // Excel JS has no worksheets.getItemAt(index). Determine the newest
-    // sheet by worksheet.position, then access it by a stable worksheet id.
-    collection.load("items/id,items/name,items/position");
-    await ctx.sync();
-    if(!collection.items.length)return null;
-    const latest=collection.items.reduce((a,b)=>Number(b.position)<Number(a.position)?b:a);
-    const sh=collection.getItem(latest.id);
-    sh.load("name,protection/protected");
-    wb.protection.load("protected");
-    const marker=sh.getRange("A1");
-    marker.format.protection.load("locked");
-    await ctx.sync();
-    if(sh.protection.protected && marker.format.protection.locked===true)return null;
-    if(sh.protection.protected){
-      sh.protection.unprotect(pw);
-      await ctx.sync();
+  shiftTimerRecoveryBusy=true;
+  try{
+    await refreshShiftSettingsFromWorkbook();
+    const freshId=getSetting(SHIFT_SHEET_ID_KEY);
+    const freshUntil=Number(getSetting(SHIFT_UNTIL_KEY));
+    if(freshId){
+      if(Number.isFinite(freshUntil)&&freshUntil>Date.now())
+        scheduleShiftWorkRelock(freshUntil);
+      // An expired existing timestamp is handled by expireShiftWorkWindow.
+      // Do NOT replace its original deadline.
+      return;
     }
-    fullLock(sh,pw);
-    if(!wb.protection.protected)wb.protection.protect(pw);
-    await ctx.sync();
-    sh.protection.load("protected");
-    marker.format.protection.load("locked");
-    await ctx.sync();
-    if(!sh.protection.protected || marker.format.protection.locked!==true)
-      throw new Error("Full Lock sheet tanpa timer gagal diverifikasi.");
-    return sh.name;
-  });
-  if(result)setSecurityStatus('PENGAMAN: Sheet "'+result+
-    '" tidak mempunyai timer tersimpan. Sheet telah FULL LOCK untuk mencegah akses tanpa batas. Admin perlu memeriksa riwayat shift.',true);
+    const info=await Excel.run(async ctx=>{
+      const collection=ctx.workbook.worksheets;
+      collection.load("items/id,items/name,items/position");
+      await ctx.sync();
+      if(!collection.items.length)return null;
+      const latest=collection.items.reduce((a,b)=>
+        Number(b.position)<Number(a.position)?b:a);
+      const sh=collection.getItem(latest.id);
+      sh.load("id,name,protection/protected");
+      const marker=sh.getRange("A1");
+      marker.format.protection.load("locked");
+      await ctx.sync();
+      return {id:sh.id,name:sh.name,protected:sh.protection.protected,
+        working:marker.format.protection.locked===false};
+    });
+    if(!info || !info.protected || !info.working)return;
+    // If the identity/timestamp survived while the ID did not, reuse its
+    // original clock. Otherwise create a recovery deadline and warn Admin.
+    const savedName=String(getSetting(SHIFT_SHEET_NAME_KEY)||"");
+    const originalStarted=Number(getSetting(SHIFT_CREATED_AT_KEY));
+    const hasOriginal=savedName===info.name &&
+      Number.isFinite(originalStarted)&&originalStarted>0 &&
+      originalStarted<=Date.now();
+    const createdAt=hasOriginal?originalStarted:Date.now();
+    const until=createdAt+SHIFT_WORK_WINDOW_MS;
+    setSetting(SHIFT_SHEET_ID_KEY,info.id);
+    setSetting(SHIFT_SHEET_NAME_KEY,info.name);
+    setSetting(SHIFT_CREATED_AT_KEY,createdAt);
+    setSetting(SHIFT_UNTIL_KEY,until);
+    await saveSettings();
+    if(until<=Date.now()){
+      await expireShiftWorkWindow();
+    }else{
+      scheduleShiftWorkRelock(until);
+      setSecurityStatus("TIMER SHIFT DIPULIHKAN untuk \""+info.name+
+        "\". "+(hasOriginal?"Waktu awal asli tetap dipakai.":
+        "Jam mulai asli tidak tersedia di perangkat ini; batas 2,5 jam dihitung sejak pemulihan.")+
+        " Sheet tidak ditutup prematur dan sel penting tetap terlindungi.",true);
+    }
+  }finally{
+    shiftTimerRecoveryBusy=false;
+  }
 }
 
 function bindAdminUnlockSafety() {
@@ -279,17 +318,22 @@ async function restoreShiftWorkWindow() {
   const untilRaw = getSetting(SHIFT_UNTIL_KEY);
 
   if (!sheetId || !untilRaw) {
-    // An earlier version may have created a working sheet without a timer.
-    // Fail closed rather than silently leave that sheet editable indefinitely.
-    // Recovery and its result verification are handled by mines-mask-recovery.js.
-    // Do not race a second protection loop while Excel Online is loading.
+    await failCloseUntrackedLatestShift();
     await refreshShiftUi();
     return;
   }
 
   const until = Number(untilRaw);
-  if (!Number.isFinite(until)) {
-    await clearShiftWorkWindowState();
+  if (!Number.isFinite(until)||until<=0) {
+    // Invalid/missing time is NOT proof that 2.5 hours have passed.
+    await refreshShiftSettingsFromWorkbook();
+    const restoredUntil=Number(getSetting(SHIFT_UNTIL_KEY));
+    if(Number.isFinite(restoredUntil)&&restoredUntil>0){
+      if(restoredUntil>Date.now())scheduleShiftWorkRelock(restoredUntil);
+      else await expireShiftWorkWindow();
+    }else{
+      setSecurityStatus("Timer sheet belum valid. Jangan anggap shift sudah habis; pemeriksaan waktu akan dicoba lagi.",true);
+    }
     return;
   }
 
