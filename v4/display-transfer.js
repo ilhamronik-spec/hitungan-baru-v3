@@ -16,12 +16,16 @@ const displayTransferState = {
 let displayTransferWrapped = false;
 let displayWrapTimer = null;
 const ROKOK_DISPLAY_AUDIT_KEY="hitunganV4.rokokDisplayTransferAuditV1";
-const ROKOK_DISPLAY_AUDIT_MAX=45;
+const ROKOK_DISPLAY_AUDIT_MAX=5; // Keep Office document settings small; last five shifts suffice for recovery.
 
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
   bindDisplayTransferUi();
   waitAndWrapCreateNewDay();
+  // Recover ONLY an already-journaled, unfinished transfer for the LATEST
+  // worksheet. Never create a new sheet or guess quantities from stock.
+  setTimeout(()=>resumePendingRokokDisplayTransfer().catch(e=>
+    showDisplayTransferMessage("Transfer Rokok belum terpulihkan: "+displayErrorText(e),true)),16000);
 });
 
 function bindDisplayTransferUi() {
@@ -57,6 +61,17 @@ function bindDisplayTransferUi() {
   search.addEventListener("input", renderDisplayTransferItems);
   list.addEventListener("input", onDisplayTransferInput);
   list.addEventListener("change", onDisplayTransferInput);
+  const form=document.getElementById("newDayForm");
+  if(form)form.addEventListener("submit",event=>{
+    captureDisplayTransferDraftFromDOM();
+    const pending=displayTransferState.items.some(x=>Number(x.qtyText)>0);
+    if(pending&&!displayTransferWrapped){
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      showDisplayTransferMessage(
+        "Transfer Rokok masih disiapkan oleh add-in. Pembuatan sheet DIBATALKAN supaya input tidak hilang; coba ulang setelah add-in siap.",true);
+    }
+  },true);
 }
 
 async function loadDisplayTransferItems(forceReload) {
@@ -210,8 +225,12 @@ function collectDisplayTransfers(sourceName, purchaseData) {
   const purchaseByRow = new Map();
   if (purchaseData && Array.isArray(purchaseData.cigarettes)) {
     purchaseData.cigarettes.forEach((item) => {
-      const qty = displayNumber(item.qty);
-      if (qty > 0) purchaseByRow.set(Number(item.row), qty);
+      // V2 can submit quantities as numeric input strings. Accept whole
+      // decimal digits, but never silently coerce invalid/free-form amounts.
+      const raw=String(item.qty??"").trim();
+      const qty=/^\d+$/.test(raw)?Number(raw):0;
+      if(Number.isSafeInteger(qty)&&qty>0)
+        purchaseByRow.set(Number(item.row),qty);
     });
   }
 
@@ -288,6 +307,31 @@ function waitAndWrapCreateNewDay() {
   }, 250);
 }
 
+
+async function resumePendingRokokDisplayTransfer(){
+  if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
+  const journal=readRokokTransferAudit().filter(x=>x.status==="pending");
+  if(!journal.length)return;
+  if((typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
+     (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)||
+     (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
+     (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy))return;
+  const latest=await Excel.run(async ctx=>{
+    const ws=ctx.workbook.worksheets;
+    ws.load("items/name,items/position");
+    await ctx.sync();
+    if(!ws.items.length)return null;
+    return ws.items.reduce((a,b)=>Number(a.position)<Number(b.position)?a:b).name;
+  });
+  const planned=journal.find(x=>x.target===latest);
+  if(!planned||!Array.isArray(planned.rows)||!planned.rows.length)return;
+  await applyDisplayTransfersToNewSheet(planned.target,
+    planned.rows.map(x=>({row:x.row,name:x.name,qty:x.qty})),planned.source);
+  if(typeof setSecurityStatus==="function"){
+    setSecurityStatus("TRANSFER ROKOK DIPULIHKAN pada sheet terbaru '"+latest+
+      "' dan F diverifikasi. Tidak ada penambahan ganda.",false);
+  }
+}
 
 function readRokokTransferAudit(){
   const raw=typeof getSetting==="function"?getSetting(ROKOK_DISPLAY_AUDIT_KEY):null;
