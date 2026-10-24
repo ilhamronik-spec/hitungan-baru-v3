@@ -44,12 +44,19 @@ function bindDisplayTransferUi() {
         showDisplayTransferMessage(displayErrorText(e), true);
       }
     } else {
-      resetDisplayTransferDrafts();
+      // Hiding this panel must NOT delete amounts already entered.
+      // Transfers are cleared only after a verified new sheet is created.
+      captureDisplayTransferDraftFromDOM();
+      body.hidden=true;
+      displayTransferState.open=false;
+      const count=displayTransferState.items.filter(item=>Number(item.qtyText)>0).length;
+      toggle.textContent=count?"Buka ("+count+" terisi)":"Buka";
     }
   });
 
   search.addEventListener("input", renderDisplayTransferItems);
   list.addEventListener("input", onDisplayTransferInput);
+  list.addEventListener("change", onDisplayTransferInput);
 }
 
 async function loadDisplayTransferItems(forceReload) {
@@ -180,8 +187,21 @@ function updateDisplayTransferSummary() {
   summary.textContent = count ? `Terisi: ${count} jenis rokok, total ${formatDisplayNumber(total)} ke display` : "Belum ada rokok yang dipindahkan ke display.";
 }
 
+function captureDisplayTransferDraftFromDOM(){
+  const list=document.getElementById("displayTransferList");
+  if(!list||typeof list.querySelectorAll!=="function")return;
+  for(const input of list.querySelectorAll('input[data-display-row]')){
+    const row=Number(input.dataset.displayRow);
+    const item=displayTransferState.items.find(x=>x.row===row);
+    if(item)item.qtyText=String(input.value||"");
+  }
+}
+
 function collectDisplayTransfers(sourceName, purchaseData) {
-  if (!displayTransferState.open) return [];
+  // Preserve pending transfers even when the panel is collapsed. Read the
+  // current DOM too, so the last typed quantity cannot be silently omitted.
+  captureDisplayTransferDraftFromDOM();
+  if (!displayTransferState.items.some(item=>String(item.qtyText||"").trim()!=="")) return [];
 
   if (displayTransferState.sourceSheetName && displayTransferState.sourceSheetName !== sourceName) {
     throw new Error(`Daftar tambah display berasal dari "${displayTransferState.sourceSheetName}", tetapi sheet aktif sekarang "${sourceName}". Tutup lalu buka kembali bagian Tambah Display.`);
@@ -315,20 +335,17 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
         const cell=sheet.getRange("F"+item.row);
         cell.load("values");
         const name=sheet.getRange("A"+item.row);name.load("values");
-        const ending=sheet.getRange("G"+item.row);ending.load("values");
-        return {item,cell,name,ending};
+        return {item,cell,name};
       });
       await ctx.sync();
       if(sheet.name!==sheetName)
         throw new Error('Sheet tujuan berubah. Harus "'+sheetName+'", aktif "'+sheet.name+'".');
       return {target:sheetName,source:sourceName,createdAt:Date.now(),status:"pending",
-        rows:values.map(({item,cell,name,ending})=>{
+        rows:values.map(({item,cell,name})=>{
           const before=displayNumber(cell.values[0][0]);
           if(String(name.values[0][0]||"").trim()!==String(item.name).trim())
             throw new Error("Nama Rokok di sheet tujuan berbeda pada baris "+item.row+".");
-          const displayBefore=ending.values[0][0];
-          return {row:item.row,name:item.name,qty:item.qty,before,expected:before+item.qty,
-            displayBefore:(typeof displayBefore==="number"&&Number.isFinite(displayBefore))?displayBefore:null};
+          return {row:item.row,name:item.name,qty:item.qty,before,expected:before+item.qty};
         })};
     });
     await saveRokokTransferAudit(planned);
@@ -338,11 +355,12 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
   const finalRows=await Excel.run(async ctx=>{
     const sheet=ctx.workbook.worksheets.getItem(planned.target);
     sheet.load("id,name,protection/protected");
+    const workMarker=sheet.getRange("A1");
+    workMarker.format.protection.load("locked");
     const targets=planned.rows.map(item=>{
       const cell=sheet.getRange("F"+item.row);cell.load("values");
       const name=sheet.getRange("A"+item.row);name.load("values");
-      const ending=sheet.getRange("G"+item.row);ending.load("values");
-      return {item,cell,name,ending};
+      return {item,cell,name};
     });
     await ctx.sync();
     for(const {item,cell,name} of targets){
@@ -357,6 +375,7 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
     const needsWrite=targets.filter(({item,cell})=>
       displayNumber(cell.values[0][0])===item.before && item.expected!==item.before);
     const originallyProtected=sheet.protection.protected;
+    const wasFullLock=originallyProtected && workMarker.format.protection.locked===true;
     let failure=null;
     try{
       if(needsWrite.length){
@@ -368,39 +387,48 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
       // Excel had not refreshed the sheet's dependent stock formulas.
       sheet.calculate(true);
       await ctx.sync();
-      for(const {cell,ending} of targets){cell.load("values");ending.load("values");}
+      for(const {cell} of targets)cell.load("values");
       await ctx.sync();
-      for(const {item,cell,ending} of targets){
+      for(const {item,cell} of targets){
         if(displayNumber(cell.values[0][0])!==item.expected)
           throw new Error("Stok display Rokok F"+item.row+" belum sesuai: diharapkan "+
             item.expected+", terbaca "+cell.values[0][0]+".");
-        // G is the display ending from the existing workbook formula.
-        // Do not rewrite formulas; detect if the input is not reflected.
-        const displayAfter=ending.values[0][0];
-        if(typeof item.displayBefore==="number" &&
-           typeof displayAfter==="number" && Number.isFinite(displayAfter) &&
-           displayAfter!==item.displayBefore+item.qty){
-          throw new Error("Rokok "+item.name+" sudah dicatat pada F"+item.row+
-            " tetapi hitungan display G"+item.row+" belum bertambah "+
-            item.qty+". Periksa rumus workbook; jangan tambah stok ulang.");
-        }
+        // Column G is the independently entered ENDING DISPLAY STOCK,
+        // not a calculated quantity that must rise with a warehouse transfer.
+        // H=F-G and L=F-K handle the downstream calculations in the workbook.
+        // Only F is the transferred quantity destination; never write G.
       }
     }catch(e){failure=e;}
     finally{
-      if(needsWrite.length && !isGlobalUnlockMode()){
-        // Restore the timed shift's working protection. If its 2.5-hour
-        // window has expired, close as FULL LOCK instead.
-        const id=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
-        const until=Number(getSetting("hitunganV4.shiftWorkUntil"));
-        const active=String(sheet.id)===id&&Number.isFinite(until)&&Date.now()<until;
-        if(active)workingLock(sheet,pw);
-        else fullLock(sheet,pw);
+      if(needsWrite.length && originallyProtected && !isGlobalUnlockMode()){
+        // Restore the EXACT protection mode seen before this transfer.
+        // A temporarily unsynchronized 2.5-hour timer must never force the
+        // newest working sheet into Full Lock just for changing F.
+        if(wasFullLock)fullLock(sheet,pw);
+        else workingLock(sheet,pw);
         await ctx.sync();
       }
     }
     if(failure)throw failure;
     return targets.map(({item})=>({row:item.row,qty:item.qty,expected:item.expected}));
   });
+  // Independently read back F AFTER the write/recalculation/protection.
+  // A successful worksheet operation alone does not prove stock persisted.
+  const confirmed=await Excel.run(async ctx=>{
+    const sheet=ctx.workbook.worksheets.getItem(planned.target);
+    const cells=planned.rows.map(item=>{
+      const r=sheet.getRange("F"+item.row);r.load("values");
+      return {item,r};
+    });
+    await ctx.sync();
+    return cells.map(({item,r})=>({
+      row:item.row,expected:item.expected,actual:displayNumber(r.values[0][0])
+    }));
+  });
+  const missing=confirmed.filter(item=>item.actual!==item.expected);
+  if(missing.length)throw new Error("Transfer Rokok belum tersimpan di sheet baru: "+
+    missing.map(x=>"F"+x.row+" diharapkan "+x.expected+", terbaca "+x.actual).join("; ")+
+    ". JANGAN buat sheet kedua untuk shift yang sama.");
   planned.status="verified";
   planned.verifiedAt=Date.now();
   await saveRokokTransferAudit(planned);
