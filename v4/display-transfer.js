@@ -308,14 +308,19 @@ function waitAndWrapCreateNewDay() {
 }
 
 
-async function resumePendingRokokDisplayTransfer(){
+async function resumePendingRokokDisplayTransfer(attempt=0){
   if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
   const journal=readRokokTransferAudit().filter(x=>x.status==="pending");
   if(!journal.length)return;
   if((typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
      (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)||
      (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
-     (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy))return;
+     (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy)){
+    if(attempt<4)setTimeout(()=>
+      resumePendingRokokDisplayTransfer(attempt+1).catch(e=>
+        showDisplayTransferMessage("Pemulihan transfer tertunda: "+displayErrorText(e),true)),12000);
+    return;
+  }
   const latest=await Excel.run(async ctx=>{
     const ws=ctx.workbook.worksheets;
     ws.load("items/name,items/position");
