@@ -11,12 +11,27 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.2.4";
+const HB_FORMULA_GUARD_BUILD="6.2.9";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
 const HB_FORMULA_GUARD_RED="#FF3030";
 const HB_FORMULA_MINES=new Set(["D275","D276","G275"]);
 const HB_FORMULA_F_BLANKS=new Set([19,20,32,33,43,52,53,58,59,60,65,66]);
+// Extra STOCK-CONSISTENCY GATE, newest sheet only. Values of L178:L238
+// are differences (F-K), not individual stock-transfer inputs.
+// Zero is valid (no difference); positive values must be multiples of ten.
+// A negative value, fraction, nonnumber, or Excel error blocks new sheets.
+const HB_ROKOK_L_FIRST=178;
+const HB_ROKOK_L_LAST=238;
+const HB_ROKOK_L_CHECK_COUNT=HB_ROKOK_L_LAST-HB_ROKOK_L_FIRST+1;
+function hbRokokLIsAllowed(value){
+  return typeof value==="number"&&Number.isSafeInteger(value)&&
+    value>=0&&value%10===0;
+}
+function hbRokokLReadable(value){
+  if(value===null||value===undefined||value==="")return "(kosong)";
+  return String(value);
+}
 
 // Snapshot formulas are stored as Excel A1 formulas. {r} is the row number.
 // Source patterns were checked against all 17 October reference formulas.
@@ -119,6 +134,16 @@ function hbFormulaGuardJournal(){
   return raw&&typeof raw==="object"&&!Array.isArray(raw)?JSON.parse(JSON.stringify(raw)):{};
 }
 function hbFormulaIssueDetail(issue){
+  if(issue.kind==="L_MULTIPLE_10"){
+    return issue.address+" — NILAI "+hbRokokLReadable(issue.actual)+
+      " BUKAN KELIPATAN 10 NONNEGATIF (harus 0, 10, 20, 30, 40, 50, dst).";
+  }
+  if(issue.stock10Error){
+    const {stock10Error,...formulaIssue}=issue;
+    return hbFormulaIssueDetail(formulaIssue)+
+      "; NILAI "+hbRokokLReadable(stock10Error)+
+      " BUKAN KELIPATAN 10 NONNEGATIF.";
+  }
   if(issue.expected===null)
     return issue.address+" — SEHARUSNYA KOSONG, tetapi sekarang terisi";
   const actual=issue.actual;
@@ -132,7 +157,7 @@ function hbFormulaGuardError(issues,sheetName){
   const details=issues.slice(0,45).map(hbFormulaIssueDetail);
   const remainder=issues.length-details.length;
   const prefix='PEMBUATAN SHEET DIBLOKIR — '+issues.length+
-    ' kesalahan rumus pada sheet sumber "'+(sheetName||"aktif")+'".';
+    ' anomali rumus/stok Rokok pada sheet terbaru "'+(sheetName||"aktif")+'".';
   return prefix+"\nLOKASI KESALAHAN:\n"+details.join("\n")+
     (remainder?"\nALAMAT TAMBAHAN ("+remainder+"): "+
       issues.slice(details.length).map(x=>x.address).join(", "):"")+
@@ -161,12 +186,13 @@ function hbFormulaSummaryText(result,formatFailure){
   const lines=[
     header,
     "Sheet terbaru: "+result.sheetName,
-    "Diperiksa: "+result.checked+" posisi sel | Anomali: "+issues.length,
+    "Diperiksa: "+result.checked+" posisi rumus + "+(result.stockCheckCount||0)+
+      " nilai L178:L238 (kelipatan 10) | Anomali: "+issues.length,
     "Acuan tetap: 17 oktober",
     "Waktu: "+new Date().toLocaleString("id-ID")
   ];
   if(issues.length){
-    lines.push("KEPUTUSAN: TIDAK BOLEH membuat sheet baru sampai rumus sheet terbaru benar.");
+    lines.push("KEPUTUSAN: DIBLOKIR sampai rumus dan nilai L178:L238 pada sheet terbaru memenuhi aturan.");
     lines.push("LOKASI KESALAHAN:");
     for(const issue of issues.slice(0,12))lines.push(hbFormulaIssueDetail(issue));
     if(issues.length>12)
@@ -176,7 +202,7 @@ function hbFormulaSummaryText(result,formatFailure){
     lines.push("Penanda: fill HITAM + font MERAH di sel anomali."+
       (confidential?" "+confidential+" sel mines rahasia hanya ditampilkan merah saat Admin membuka semua sheet.":""));
   }else{
-    lines.push("KEPUTUSAN: rumus sheet terbaru sesuai pola; pemeriksaan rumus tidak menghalangi pembuatan sheet selanjutnya.");
+    lines.push("KEPUTUSAN: Rumus sesuai pola; seluruh L178:L238 merupakan kelipatan 10 nonnegatif. Sheet baru boleh dibuat.");
   }
   if(formatFailure)
     lines.push("PERHATIAN: pengaturan warna belum berhasil/terverifikasi: "+
@@ -223,6 +249,8 @@ async function hbScanLatestSheetFormulas(){
       range.load("formulas");
       return {...group,range};
     });
+    const rokokL=sh.getRange("L178:L238");
+    rokokL.load("values");
     const fixed=Object.entries(HB_FORMULA_FIXED).map(([address,expected])=>{
       const range=sh.getRange(address);range.load("formulas");
       return {address,expected,range};
@@ -247,7 +275,25 @@ async function hbScanLatestSheetFormulas(){
         issues.push({address,expected,actual});
       }
     }
-    return {sheetId:sh.id,sheetName:sh.name,issues,checked:HB_FORMULA_REFERENCE.size};
+    // Audit CALCULATED values, not the L formula strings. The formula-pattern
+    // guard above independently ensures L formulas were not replaced/removed.
+    // Merge an invalid value into an existing formula issue at the same cell,
+    // avoiding duplicate markers and preserving one address per anomaly.
+    const lValues=rokokL.values;
+    if(!Array.isArray(lValues)||lValues.length!==HB_ROKOK_L_CHECK_COUNT)
+      throw new Error("Tidak dapat memeriksa 61 nilai L178:L238. Buat Sheet Baru DIBLOKIR demi keamanan.");
+    for(let index=0;index<HB_ROKOK_L_CHECK_COUNT;index++){
+      if(!Array.isArray(lValues[index])||lValues[index].length!==1)
+        throw new Error("Nilai L"+(HB_ROKOK_L_FIRST+index)+" tidak terbaca. Buat Sheet Baru DIBLOKIR.");
+      const actual=lValues[index][0];
+      if(hbRokokLIsAllowed(actual))continue;
+      const address="L"+(HB_ROKOK_L_FIRST+index);
+      const existing=issues.find(x=>x.address===address);
+      if(existing)existing.stock10Error=actual;
+      else issues.push({address,kind:"L_MULTIPLE_10",actual});
+    }
+    return {sheetId:sh.id,sheetName:sh.name,issues,
+      checked:HB_FORMULA_REFERENCE.size,stockCheckCount:HB_ROKOK_L_CHECK_COUNT};
   });
 }
 
