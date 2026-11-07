@@ -712,23 +712,35 @@ async function hbVerifySourceFormulas(blockCreation=false){
           new Error("Pemulihan warna Rokok: "+(e.message||e));
       }
     }
+    // Open ONLY the exact correction input cells on the protected latest
+    // sheet, then restore those original locks when its anomalies disappear.
+    // Access errors must be visible and must never silently grant Full Access.
+    let accessFailure=null;
+    try{await hbSyncCorrectionOnlyAccess(result);}catch(e){accessFailure=e;}
+    const warning=accessFailure
+      ?new Error((formatFailure?formatFailure.message+"; ":"")+
+        "akses koreksi terbatas: "+(accessFailure.message||String(accessFailure)))
+      :formatFailure;
     // Keep this visible regardless of later workbook-protection status messages.
-    hbRenderFormulaSummary(result,formatFailure);
+    hbRenderFormulaSummary(result,warning);
     if(result.issues.length){
       const msg=hbFormulaGuardError(result.issues,result.sheetName);
-      const notice=msg+(formatFailure?
-        "\nPERINGATAN: Sebagian warna belum berhasil diterapkan ("+formatFailure.message+").":"");
+      const notice=msg+(warning?
+        "\nPERINGATAN: Sebagian warna / akses koreksi belum berhasil ("+warning.message+").":"");
       hbShowFormulaNote(notice);
       if(blockCreation)throw new Error(notice);
     }else{
-      if(!formatFailure)hbClearStaleFormulaBlockMessage();
+      if(!warning)hbClearStaleFormulaBlockMessage();
+      if(accessFailure&&blockCreation)
+        throw new Error("Pembuatan sheet DIBLOKIR: akses koreksi sebelumnya belum bisa dikunci kembali. "+
+          (accessFailure.message||String(accessFailure)));
     }
-    if(!result.issues.length&&formatFailure){
+    if(!result.issues.length&&warning){
       // Valid source formulas must not be blocked merely because an old
       // warning color could not be restored by Excel.
       if(typeof setSecurityStatus==="function")
         setSecurityStatus("Rumus sumber BENAR, tetapi pemulihan warna peringatan belum selesai: "+
-          formatFailure.message,true);
+          warning.message,true);
     }
     return result;
   })();
