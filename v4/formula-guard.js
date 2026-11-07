@@ -189,7 +189,9 @@ function hbFormulaGuardError(issues,sheetName){
     (remainder?"\nALAMAT TAMBAHAN ("+remainder+"): "+
       issues.slice(details.length).map(x=>x.address).join(", "):"")+
     "\nSel bermasalah ditandai FILL HITAM dan FONT MERAH."+
-    "\nBetulkan rumus pada sheet sumber terlebih dahulu; rumus/stok tidak diperbaiki otomatis.";
+    "\nPerbaiki rumus, selisih stok, atau harga yang menyebabkan margin minus pada SHEET TERBARU."+
+    "\nPenanda hitam-merah dan warna hitam margin akan hilang ketika anomali sudah benar."+
+    "\nAplikasi tidak mengubah rumus, harga, atau stok secara otomatis.";
 }
 function hbShowFormulaNote(message){
   if(typeof setSecurityStatus==="function")setSecurityStatus(message,true);
