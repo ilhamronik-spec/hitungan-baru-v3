@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.2.9";
+const HB_FORMULA_GUARD_BUILD="6.3.0";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
 const HB_FORMULA_GUARD_RED="#FF3030";
@@ -133,7 +133,33 @@ function hbFormulaGuardJournal(){
   const raw=getSetting(HB_FORMULA_GUARD_JOURNAL_KEY);
   return raw&&typeof raw==="object"&&!Array.isArray(raw)?JSON.parse(JSON.stringify(raw)):{};
 }
+// The same price/margin calculation that makes the product NAME black.
+ // Paket: C (harga jual) - B (harga beli); Rokok: native margin E.
+ // Never flag a black-filled mines cell or a black/red formula alert as a
+ // negative-margin product. The price guards mirror margin-colors.js.
+function hbNegativeProductMargin(name,selling,cost,margin,category,row,address){
+  if(!String(name??"").trim()||
+     typeof selling!=="number"||!Number.isFinite(selling)||selling<=0||
+     typeof cost!=="number"||!Number.isFinite(cost)||cost<=0||
+     typeof margin!=="number"||!Number.isFinite(margin)||margin>=0)return null;
+  return {category,name:String(name).trim(),selling,cost,margin,row,address};
+}
+function hbMarginValueLabel(value){
+  return new Intl.NumberFormat("id-ID",{maximumFractionDigits:2}).format(value);
+}
+function hbMarginIssueText(info){
+  return info.address+" — "+info.category+" "+info.name+
+    " (baris "+info.row+") HITAM karena MARGIN MINUS "+
+    hbMarginValueLabel(info.margin)+
+    ". Harga jual "+hbMarginValueLabel(info.selling)+
+    ", harga beli "+hbMarginValueLabel(info.cost)+".";
+}
 function hbFormulaIssueDetail(issue){
+  if(issue.kind==="NEGATIVE_MARGIN")return hbMarginIssueText(issue.marginIssue);
+  if(issue.marginIssue){
+    const {marginIssue,...rest}=issue;
+    return hbFormulaIssueDetail(rest)+"; "+hbMarginIssueText(marginIssue);
+  }
   if(issue.kind==="L_MULTIPLE_10"){
     return issue.address+" — NILAI "+hbRokokLReadable(issue.actual)+
       " BUKAN KELIPATAN 10 NONNEGATIF (harus 0, 10, 20, 30, 40, 50, dst).";
@@ -157,7 +183,8 @@ function hbFormulaGuardError(issues,sheetName){
   const details=issues.slice(0,45).map(hbFormulaIssueDetail);
   const remainder=issues.length-details.length;
   const prefix='PEMBUATAN SHEET DIBLOKIR — '+issues.length+
-    ' anomali rumus/stok Rokok pada sheet terbaru "'+(sheetName||"aktif")+'".';
+    ' anomali rumus, stok Rokok, atau margin minus Paket/Rokok pada sheet terbaru "'+
+    (sheetName||"aktif")+'".';
   return prefix+"\nLOKASI KESALAHAN:\n"+details.join("\n")+
     (remainder?"\nALAMAT TAMBAHAN ("+remainder+"): "+
       issues.slice(details.length).map(x=>x.address).join(", "):"")+
@@ -187,12 +214,13 @@ function hbFormulaSummaryText(result,formatFailure){
     header,
     "Sheet terbaru: "+result.sheetName,
     "Diperiksa: "+result.checked+" posisi rumus + "+(result.stockCheckCount||0)+
-      " nilai L178:L238 (kelipatan 10) | Anomali: "+issues.length,
+      " nilai L178:L238 + "+(result.marginCheckCount||0)+
+      " baris margin Paket/Rokok | Anomali: "+issues.length,
     "Acuan tetap: 17 oktober",
     "Waktu: "+new Date().toLocaleString("id-ID")
   ];
   if(issues.length){
-    lines.push("KEPUTUSAN: DIBLOKIR sampai rumus dan nilai L178:L238 pada sheet terbaru memenuhi aturan.");
+    lines.push("KEPUTUSAN: DIBLOKIR sampai rumus, kelipatan 10, dan margin Paket/Rokok tidak minus.");
     lines.push("LOKASI KESALAHAN:");
     for(const issue of issues.slice(0,12))lines.push(hbFormulaIssueDetail(issue));
     if(issues.length>12)
@@ -202,7 +230,7 @@ function hbFormulaSummaryText(result,formatFailure){
     lines.push("Penanda: fill HITAM + font MERAH di sel anomali."+
       (confidential?" "+confidential+" sel mines rahasia hanya ditampilkan merah saat Admin membuka semua sheet.":""));
   }else{
-    lines.push("KEPUTUSAN: Rumus sesuai pola; seluruh L178:L238 merupakan kelipatan 10 nonnegatif. Sheet baru boleh dibuat.");
+    lines.push("KEPUTUSAN: Rumus sesuai pola, L178:L238 kelipatan 10, tidak ada Paket/Rokok bermargin minus. Sheet baru boleh dibuat.");
   }
   if(formatFailure)
     lines.push("PERHATIAN: pengaturan warna belum berhasil/terverifikasi: "+
@@ -251,6 +279,11 @@ async function hbScanLatestSheetFormulas(){
     });
     const rokokL=sh.getRange("L178:L238");
     rokokL.load("values");
+    // Match the negative-margin/black-name coloring rules exactly.
+    const packetMargins=sh.getRange("A6:C75");
+    packetMargins.load("values");
+    const cigaretteMargins=sh.getRange("A178:E238");
+    cigaretteMargins.load("values");
     const fixed=Object.entries(HB_FORMULA_FIXED).map(([address,expected])=>{
       const range=sh.getRange(address);range.load("formulas");
       return {address,expected,range};
@@ -292,8 +325,36 @@ async function hbScanLatestSheetFormulas(){
       if(existing)existing.stock10Error=actual;
       else issues.push({address,kind:"L_MULTIPLE_10",actual});
     }
+    const packet=packetMargins.values,cigarettes=cigaretteMargins.values;
+    if(!Array.isArray(packet)||packet.length!==70||
+       !Array.isArray(cigarettes)||cigarettes.length!==61)
+      throw new Error("Pemeriksaan margin Paket/Rokok belum lengkap. Buat Sheet Baru DIBLOKIR.");
+    const pushMarginIssue=info=>{
+      if(!info)return;
+      const original=issues.find(x=>x.address===info.address);
+      if(original)original.marginIssue=info;
+      else issues.push({address:info.address,kind:"NEGATIVE_MARGIN",marginIssue:info});
+    };
+    for(let i=0;i<packet.length;i++){
+      const row=6+i,values=packet[i];
+      if(!Array.isArray(values)||values.length!==3)
+        throw new Error("Pemeriksaan harga Paket baris "+row+" tidak lengkap.");
+      const [name,buy,sell]=values;
+      pushMarginIssue(hbNegativeProductMargin(name,sell,buy,
+        typeof sell==="number"&&typeof buy==="number"?sell-buy:NaN,
+        "PAKET",row,"C"+row));
+    }
+    for(let i=0;i<cigarettes.length;i++){
+      const row=178+i,values=cigarettes[i];
+      if(!Array.isArray(values)||values.length!==5)
+        throw new Error("Pemeriksaan harga Rokok baris "+row+" tidak lengkap.");
+      const [name,sell,buy,,margin]=values;
+      pushMarginIssue(hbNegativeProductMargin(name,sell,buy,margin,
+        "ROKOK",row,"E"+row));
+    }
     return {sheetId:sh.id,sheetName:sh.name,issues,
-      checked:HB_FORMULA_REFERENCE.size,stockCheckCount:HB_ROKOK_L_CHECK_COUNT};
+      checked:HB_FORMULA_REFERENCE.size,stockCheckCount:HB_ROKOK_L_CHECK_COUNT,
+      marginCheckCount:131};
   });
 }
 
