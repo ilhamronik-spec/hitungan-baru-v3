@@ -637,8 +637,17 @@ async function hbSyncCorrectionOnlyAccess(result){
           },pw);
           await ctx.sync();
         }catch(e){
+          // Never leave the whole worksheet unprotected if Office rejects
+          // the narrow correction-mode protection options.
+          let fallbackError=null;
+          try{
+            fullLock(sh,pw);
+            await ctx.sync();
+          }catch(restoreError){fallbackError=restoreError;}
           throw new Error("Gagal mengunci ulang sheet setelah memberi akses koreksi: "+
-            (e&&e.message||String(e)));
+            (e&&e.message||String(e))+
+            (fallbackError?"; Full Lock darurat juga gagal: "+
+              (fallbackError.message||String(fallbackError)):"; Full Lock darurat diterapkan."));
         }
       }
     }
