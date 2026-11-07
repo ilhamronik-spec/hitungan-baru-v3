@@ -259,6 +259,75 @@ async function hbMarginApplyToSheet(entry,allowTrackedShift=false){
   });
 }
 
+// Refresh ONLY the newest sheet's cigarette NAME colors. Unlike Paket,
+// cigarette names use static A-cell colors based on the calculated E margin,
+// and otherwise remain black even after the employee fixes the price.
+// This read-and-diff refresh never edits a price, stock, or formula.
+async function hbMarginRefreshLatestRokokNames(expectedSheetId){
+  return Excel.run(async ctx=>{
+    const collection=ctx.workbook.worksheets;
+    collection.load("items/id,items/position");
+    await ctx.sync();
+    if(!collection.items.length)return 0;
+    const latest=collection.items.reduce((a,b)=>
+      Number(a.position)<Number(b.position)?a:b);
+    if(String(latest.id)!==String(expectedSheetId))return 0;
+    const sh=collection.getItem(latest.id);
+    sh.load("id,protection/protected");
+    const marker=sh.getRange("A1");
+    marker.format.protection.load("locked");
+    const rows=sh.getRange("A178:E238");rows.load("values");
+    const nameCells=[];
+    for(let row=178;row<=238;row++){
+      const cell=sh.getRange("A"+row);
+      cell.format.fill.load("color");
+      cell.format.font.load("color");
+      nameCells.push(cell);
+    }
+    await ctx.sync();
+    const changes=[];
+    for(let i=0;i<nameCells.length;i++){
+      const expected=hbCigaretteRowStyle(rows.values[i]);
+      if(!expected)continue;
+      const cell=nameCells[i];
+      if(!hbColorCompare(cell.format.fill.color,expected.fill)||
+         !hbColorCompare(cell.format.font.color,expected.font))
+        changes.push({cell,expected});
+    }
+    if(!changes.length)return 0;
+    const protectedBefore=sh.protection.protected;
+    const originallyFull=protectedBefore&&marker.format.protection.locked===true;
+    const pw=protectedBefore?requireSecret():null;
+    let unlocked=false,failed=null;
+    try{
+      if(protectedBefore){
+        unlocked=true;
+        sh.protection.unprotect(pw);
+        await ctx.sync();
+      }
+      for(const {cell,expected} of changes){
+        cell.format.fill.color=expected.fill;
+        cell.format.font.color=expected.font;
+      }
+      await ctx.sync();
+    }catch(e){failed=e;}
+    finally{
+      if(unlocked){
+        try{
+          if(originallyFull)fullLock(sh,pw);
+          else workingLock(sh,pw);
+          await ctx.sync();
+        }catch(relockError){
+          throw new Error("Proteksi Rokok gagal dipulihkan: "+
+            (relockError.message||String(relockError)));
+        }
+      }
+    }
+    if(failed)throw failed;
+    return changes.length;
+  });
+}
+
 async function hbMarginInstallNewSheet(name){
   if(isGlobalUnlockMode())return 0;
   const entry=await Excel.run(async ctx=>{
