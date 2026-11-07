@@ -408,6 +408,13 @@ async function expireShiftWorkWindow() {
     shiftAutoLockRetryTimer=null;
     await refreshShiftUi();
     setSecurityStatus('FULL LOCK TERVERIFIKASI — sheet "'+result+'" sudah ditutup setelah batas 2,5 jam.',false);
+    // Re-run the newest-sheet anomaly guard ONCE after timed Full Lock.
+    // The sheet stays protected; only still-invalid correction inputs may
+    // become editable. Never let an audit failure invalidate the completed lock.
+    if(typeof hbVerifySourceFormulas==="function"&&!hbShiftPipelineBusy){
+      try{await hbVerifySourceFormulas(false);}
+      catch(e){shiftSecurityError("Pembukaan sel koreksi setelah Full Lock",e);}
+    }
   }catch(e){
     shiftSecurityError('AUTO-LOCK 2,5 jam "'+sheetName+'"',e);
     scheduleShiftAutoLockRetry();
