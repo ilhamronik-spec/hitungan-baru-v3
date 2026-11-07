@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.3.0";
+const HB_FORMULA_GUARD_BUILD="6.3.1";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
 const HB_FORMULA_GUARD_RED="#FF3030";
@@ -460,16 +460,70 @@ async function hbPaintFormulaIssues(result){
 
 let hbFormulaRunning=null;
 let hbFormulaAuditBusy=false;
+let hbFormulaWatchedSheetId=null;
+let hbFormulaChangeTimer=null;
+// Worksheet.onChanged is supported by ExcelApi 1.7 (the current manifest).
+// Recheck only after a committed edit; no recurring per-minute workbook writes.
+async function hbWatchLatestFormulaCorrections(id){
+  if(hbFormulaWatchedSheetId===String(id))return;
+  const nextId=String(id);
+  await Excel.run(async ctx=>{
+    const sh=ctx.workbook.worksheets.getItem(nextId);
+    if(!sh.onChanged||typeof sh.onChanged.add!=="function")return;
+    sh.onChanged.add(event=>{
+      if(hbFormulaWatchedSheetId!==nextId)return;
+      if(hbFormulaChangeTimer)clearTimeout(hbFormulaChangeTimer);
+      hbFormulaChangeTimer=setTimeout(()=>{
+        hbFormulaChangeTimer=null;
+        const busy=
+          (typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
+          (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)||
+          (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)||
+          (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
+          (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy);
+        if(busy)return;
+        hbVerifySourceFormulas(false).catch(e=>hbRenderFormulaAuditUnavailable(e));
+      },2400);
+    });
+    await ctx.sync();
+    hbFormulaWatchedSheetId=nextId;
+  });
+}
+function hbClearStaleFormulaBlockMessage(){
+  if(typeof document==="undefined")return;
+  const panel=document.getElementById("securityStatus");
+  if(panel&&/PEMBUATAN SHEET DIBLOKIR/.test(panel.textContent||"")&&
+     typeof setSecurityStatus==="function")
+    setSecurityStatus("PEMERIKSAAN ULANG LOLOS — anomali telah diperbaiki. Warna peringatan dipulihkan.",false);
+  const form=document.getElementById("status");
+  if(form&&/PEMBUATAN SHEET DIBLOKIR/.test(form.textContent||""))
+    form.textContent="Anomali sudah diperbaiki; pemeriksaan rumus dan stok sekarang lolos.";
+}
 async function hbVerifySourceFormulas(blockCreation=false){
   if(hbFormulaRunning){
-    await hbFormulaRunning;
-    // In a concurrent preflight, rescan rather than reusing a stale result.
+    try{await hbFormulaRunning;}catch(_){
+      // A preceding blocked preflight does not prevent a fresh rescan
+      // after the operator repairs an incorrect cell.
+    }
   }
   hbFormulaAuditBusy=true;
   const run=(async()=>{
     const result=await hbScanLatestSheetFormulas();
+    // Event subscription is best-effort and must never block preflight.
+    try{await hbWatchLatestFormulaCorrections(result.sheetId);}catch(_){}
     let formatFailure=null;
     try{await hbPaintFormulaIssues(result);}catch(e){formatFailure=e;}
+    // Cigarette NAME colors use static base fills (unlike dynamic Paket
+    // formatting); they must be refreshed after a negative E margin is fixed.
+    if(typeof hbMarginRefreshLatestRokokNames==="function"){
+      try{
+        await hbMarginRefreshLatestRokokNames(result.sheetId);
+      }catch(e){
+        formatFailure=formatFailure?
+          new Error(formatFailure.message+"; perbaikan warna Rokok: "+(e.message||e)):
+          new Error("Pemulihan warna Rokok: "+(e.message||e));
+      }
+    }
     // Keep this visible regardless of later workbook-protection status messages.
     hbRenderFormulaSummary(result,formatFailure);
     if(result.issues.length){
@@ -478,7 +532,10 @@ async function hbVerifySourceFormulas(blockCreation=false){
         "\nPERINGATAN: Sebagian warna belum berhasil diterapkan ("+formatFailure.message+").":"");
       hbShowFormulaNote(notice);
       if(blockCreation)throw new Error(notice);
-    }else if(formatFailure){
+    }else{
+      if(!formatFailure)hbClearStaleFormulaBlockMessage();
+    }
+    if(!result.issues.length&&formatFailure){
       // Valid source formulas must not be blocked merely because an old
       // warning color could not be restored by Excel.
       if(typeof setSecurityStatus==="function")
