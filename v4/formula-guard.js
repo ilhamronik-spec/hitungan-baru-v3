@@ -581,4 +581,14 @@ Office.onReady(info=>{
   // One delayed startup audit, never a recurring background write every
   // minute. The next shift is always validated immediately before cloning.
   setTimeout(passiveAudit,11000);
+  // A newly created shift becomes the newest tab. Attach its own onChanged
+  // watcher only AFTER creation settles so future corrections can automatically
+  // restore black/red flags and cigarette margin colors in that new tab.
+  Excel.run(async ctx=>{
+    const sheets=ctx.workbook.worksheets;
+    if(sheets.onAdded&&typeof sheets.onAdded.add==="function"){
+      sheets.onAdded.add(()=>setTimeout(passiveAudit,15000));
+      await ctx.sync();
+    }
+  }).catch(()=>{}); // Optional Excel event support must not block creating sheets.
 });
