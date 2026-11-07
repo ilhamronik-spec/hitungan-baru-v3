@@ -11,8 +11,9 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.3.1";
+const HB_FORMULA_GUARD_BUILD="6.3.2";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
+const HB_CORRECTION_ACCESS_KEY="hitunganV4.anomalyCorrectionAccessV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
 const HB_FORMULA_GUARD_RED="#FF3030";
 const HB_FORMULA_MINES=new Set(["D275","D276","G275"]);
@@ -154,6 +155,48 @@ function hbMarginIssueText(info){
     ". Harga jual "+hbMarginValueLabel(info.selling)+
     ", harga beli "+hbMarginValueLabel(info.cost)+".";
 }
+// Generate the exact, minimal editable INPUT addresses for each anomaly.
+// Do not open name cells merely because they are black due to margin.
+// Do not make calculated L or confidential mines editable to disguise errors.
+function hbCorrectionTargets(issues){
+  const targets=new Set();
+  for(const issue of issues||[]){
+    if(issue.marginIssue){
+      const info=issue.marginIssue,row=Number(info.row);
+      if(Number.isInteger(row)){
+        if(info.category==="PAKET"&&row>=6&&row<=75)
+          targets.add("C"+row); // Paket: selling price, not product name A
+        else if(info.category==="ROKOK"&&row>=178&&row<=238)
+          targets.add("B"+row); // Rokok: selling price; E is calculated
+      }
+    }
+    if(issue.kind==="L_MULTIPLE_10" ||
+       Object.prototype.hasOwnProperty.call(issue,"stock10Error")){
+      const row=Number(String(issue.address||"").replace(/^L/,""));
+      if(Number.isInteger(row)&&row>=178&&row<=238)
+        targets.add("K"+row); // L=F-K: allow correction of ending display K
+    }
+    // Actual formula anomaly: allow only that broken formula cell, never
+    // sensitive mines values. Any new A12 anomaly would unlock only A12.
+    if(Object.prototype.hasOwnProperty.call(issue,"expected") &&
+       !HB_FORMULA_MINES.has(issue.address) &&
+       /^[A-Z]{1,2}[1-9][0-9]*$/.test(String(issue.address||""))){
+      // Do not open calculated L for a stock-multiple issue unless
+      // the L formula itself is independently incorrect.
+      targets.add(issue.address);
+    }
+  }
+  return [...targets].sort((a,b)=>{
+    const ra=Number(a.match(/\d+/)[0]),rb=Number(b.match(/\d+/)[0]);
+    return ra-rb||a.localeCompare(b);
+  });
+}
+function hbCorrectionAccessJournal(){
+  const raw=getSetting(HB_CORRECTION_ACCESS_KEY);
+  return raw&&typeof raw==="object"&&!Array.isArray(raw)
+    ?JSON.parse(JSON.stringify(raw)):{};
+}
+
 function hbFormulaIssueDetail(issue){
   if(issue.kind==="NEGATIVE_MARGIN")return hbMarginIssueText(issue.marginIssue);
   if(issue.marginIssue){
@@ -191,6 +234,9 @@ function hbFormulaGuardError(issues,sheetName){
     "\nSel bermasalah ditandai FILL HITAM dan FONT MERAH."+
     "\nPerbaiki rumus, selisih stok, atau harga yang menyebabkan margin minus pada SHEET TERBARU."+
     "\nPenanda hitam-merah dan warna hitam margin akan hilang ketika anomali sudah benar."+
+    "\nKOREKSI KARYAWAN: hanya "+(hbCorrectionTargets(issues).join(", ")||"tidak ada sel yang aman untuk dibuka")+
+    " yang boleh diedit. Nama barang hitam tidak otomatis boleh diedit."+
+    "\nSel lain tetap terkunci sesuai mode proteksi; setelah perbaikan lolos, akses koreksi ditutup otomatis."+
     "\nAplikasi tidak mengubah rumus, harga, atau stok secara otomatis.";
 }
 function hbShowFormulaNote(message){
@@ -223,6 +269,9 @@ function hbFormulaSummaryText(result,formatFailure){
   ];
   if(issues.length){
     lines.push("KEPUTUSAN: DIBLOKIR sampai rumus, kelipatan 10, dan margin Paket/Rokok tidak minus.");
+    const corrections=hbCorrectionTargets(issues);
+    lines.push("SEL KOREKSI KARYAWAN (tanpa PIN): "+(corrections.join(", ")||"tidak ada; perlu Admin"));
+    lines.push("Hanya sel itu yang dikecualikan dari Full Lock. Setelah lolos, otomatis terkunci kembali.");
     lines.push("LOKASI KESALAHAN:");
     for(const issue of issues.slice(0,12))lines.push(hbFormulaIssueDetail(issue));
     if(issues.length>12)
