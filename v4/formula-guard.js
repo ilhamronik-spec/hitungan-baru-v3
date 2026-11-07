@@ -509,6 +509,143 @@ async function hbPaintFormulaIssues(result){
   await saveSettings();
 }
 
+// Grant a worksheet-level exception ONLY to cells needed for correcting
+// currently detected issues. The worksheet itself stays protected; every
+// other cell retains the previously applied Full Lock / Working Lock rules.
+// Original cell locked/formulaHidden flags are journaled per sheet so that
+// fixing the issue can restore the precise prior protection.
+async function hbSyncCorrectionOnlyAccess(result){
+  if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
+  if(typeof isGlobalUnlockMode==="function"&&isGlobalUnlockMode())return;
+  const desired=hbCorrectionTargets(result.issues);
+  const desiredSet=new Set(desired);
+  const journal=hbCorrectionAccessJournal();
+  const existing=journal[result.sheetId]||{name:result.sheetName,cells:{}};
+  const recorded=existing.cells||{};
+  const inspected=[...new Set([...desired,...Object.keys(recorded)])];
+  if(!inspected.length)return;
+  // Read the actual locking state every time; another Excel Online device
+  // may have run Full Lock after this task pane last audited the sheet.
+  const before=await Excel.run(async ctx=>{
+    const sheets=ctx.workbook.worksheets;
+    sheets.load("items/id,items/position");
+    await ctx.sync();
+    if(!sheets.items.length)return null;
+    const latest=sheets.items.reduce((a,b)=>
+      Number(a.position)<Number(b.position)?a:b);
+    if(String(latest.id)!==String(result.sheetId))
+      throw new Error("Sheet terbaru berubah saat memberi akses koreksi; pemeriksaan harus diulang.");
+    const sh=sheets.getItem(result.sheetId);
+    sh.load("id,protection/protected");
+    const marker=sh.getRange("A1");
+    marker.format.protection.load("locked");
+    const ranges=inspected.map(address=>{
+      const r=sh.getRange(address);
+      r.format.protection.load("locked,formulaHidden");
+      return {address,r};
+    });
+    await ctx.sync();
+    return {
+      protectedBefore:Boolean(sh.protection.protected),
+      fullLock:marker.format.protection.locked===true,
+      cells:ranges.map(({address,r})=>({
+        address,
+        locked:r.format.protection.locked===true,
+        formulaHidden:r.format.protection.formulaHidden===true
+      }))
+    };
+  });
+  if(!before)return;
+  const read=new Map(before.cells.map(x=>[x.address,x]));
+  const nextCells={};
+  // On a first exception preserve the original protection. On later audits,
+  // retain that original snapshot even if the cell is currently editable.
+  for(const address of desired){
+    nextCells[address]=recorded[address]||{
+      locked:read.get(address).locked,
+      formulaHidden:read.get(address).formulaHidden
+    };
+  }
+  const changes=[];
+  for(const address of inspected){
+    const current=read.get(address),old=recorded[address];
+    if(desiredSet.has(address)){
+      if(current.locked||current.formulaHidden)
+        changes.push({address,locked:false,formulaHidden:false});
+    }else if(old &&
+             (current.locked!==Boolean(old.locked) ||
+              current.formulaHidden!==Boolean(old.formulaHidden))){
+      changes.push({address,locked:Boolean(old.locked),
+        formulaHidden:Boolean(old.formulaHidden)});
+    }
+  }
+  // Store the journal before any edit, allowing the original protected
+  // attributes to be recovered after an Excel save/reload interruption.
+  const oldSerialized=JSON.stringify(recorded);
+  const newSerialized=JSON.stringify(nextCells);
+  if(oldSerialized!==newSerialized){
+    if(Object.keys(nextCells).length)
+      journal[result.sheetId]={name:result.sheetName,cells:nextCells};
+    else delete journal[result.sheetId];
+    setSetting(HB_CORRECTION_ACCESS_KEY,journal);
+    await saveSettings();
+  }
+  if(!changes.length)return;
+  await Excel.run(async ctx=>{
+    const sheets=ctx.workbook.worksheets;
+    sheets.load("items/id,items/position");
+    await ctx.sync();
+    const latest=sheets.items.reduce((a,b)=>
+      Number(a.position)<Number(b.position)?a:b);
+    if(String(latest.id)!==String(result.sheetId))
+      throw new Error("Sheet berubah sebelum akses koreksi diterapkan.");
+    const sh=sheets.getItem(result.sheetId);
+    sh.load("id,protection/protected");
+    const marker=sh.getRange("A1");
+    marker.format.protection.load("locked");
+    await ctx.sync();
+    const originallyProtected=Boolean(sh.protection.protected);
+    const wasFull=marker.format.protection.locked===true;
+    const pw=originallyProtected?requireSecret():null;
+    let startedUnprotect=false,failed=null;
+    try{
+      if(originallyProtected){
+        startedUnprotect=true;
+        sh.protection.unprotect(pw);
+        await ctx.sync();
+      }
+      for(const item of changes){
+        const correction=sh.getRange(item.address);
+        correction.format.protection.locked=item.locked;
+        correction.format.protection.formulaHidden=item.formulaHidden;
+      }
+      await ctx.sync();
+    }catch(e){failed=e;}
+    finally{
+      if(startedUnprotect){
+        try{
+          // Do not call fullLock/workingLock: both reset protection on many
+          // unrelated cells. Reprotect without changing any other cell flags.
+          sh.protection.protect({
+            selectionMode:(wasFull&&desired.length===0)
+              ?Excel.ProtectionSelectionMode.none
+              :Excel.ProtectionSelectionMode.unlocked,
+            allowFormatCells:false,allowFormatColumns:false,
+            allowFormatRows:false,allowInsertColumns:false,
+            allowInsertRows:false,allowDeleteColumns:false,
+            allowDeleteRows:false
+          },pw);
+          await ctx.sync();
+        }catch(e){
+          throw new Error("Gagal mengunci ulang sheet setelah memberi akses koreksi: "+
+            (e&&e.message||String(e)));
+        }
+      }
+    }
+    if(failed)throw failed;
+  });
+}
+
 let hbFormulaRunning=null;
 let hbFormulaAuditBusy=false;
 let hbFormulaWatchedSheetId=null;
