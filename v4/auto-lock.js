@@ -41,6 +41,7 @@ async function hbClearExplicitCloseShift(id){
   await saveSettings();
 }
 
+let hbAdminRelockRetries=0;
 let adminSheetRelockTimer = null;
 let shiftWorkRelockTimer = null;
 let shiftCreateWrapped = false;
@@ -744,6 +745,7 @@ async function relockPendingAdminSheet() {
       return {id:sh.id,name:sh.name,working};
     });
     if(!result.working)await hbAssertFullLock(result.id);
+    hbAdminRelockRetries=0;
     await clearAdminSheetAutoLockState();
     const mode=result.working?"sheet kerja (shift terbaru masih aktif)":"FULL LOCK TERVERIFIKASI";
     setSecurityStatus('AUTO-LOCK ADMIN — sheet "'+result.name+
@@ -752,7 +754,8 @@ async function relockPendingAdminSheet() {
     setSecurityStatus('GAGAL mengunci kembali sheet "'+sheetName+
       '": '+(e&&e.message||String(e))+
       '. Timer admin tidak dihapus agar pemulihan dapat dicoba lagi.',true);
-    scheduleShiftAutoLockRetry();
+    if(++hbAdminRelockRetries<=5)
+      scheduleAdminSheetRelock(Date.now()+20000);
   }
 }
 
