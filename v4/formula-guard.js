@@ -517,6 +517,10 @@ async function hbPaintFormulaIssues(result){
 async function hbSyncCorrectionOnlyAccess(result){
   if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
   if(typeof isGlobalUnlockMode==="function"&&isGlobalUnlockMode())return;
+  // Refresh workbook-backed close intent, not just this browser's cached
+  // settings. Failure to refresh must fail closed instead of granting access.
+  if(typeof refreshShiftSettingsFromWorkbook==="function")
+    await refreshShiftSettingsFromWorkbook();
   // Explicit employee/admin close is FINAL: formula/margin corrections cannot
   // silently turn a deliberately closed shift back into an editable sheet.
   if(typeof hbIsExplicitlyClosedShift==="function"&&
