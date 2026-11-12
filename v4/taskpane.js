@@ -485,8 +485,53 @@ async function unlockAdminMenu(){
 }
 
 async function adminUnlockSheet(){try{await checkPin();if(isGlobalUnlockMode())return setSecurityStatus("Semua sheet sudah terbuka dalam mode ADMIN BEBAS.",false);const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);await c.sync();setSecurityStatus(`ADMIN: sheet "${sh.name}" dibuka.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
-async function adminWorkingLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);workingLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" dikunci sebagai sheet kerja.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
-async function adminFullLock(){try{await checkPin();assertGlobalUnlockOff();const pw=requireSecret();await Excel.run(async c=>{const sh=c.workbook.worksheets.getActiveWorksheet();sh.load("name,protection/protected");await c.sync();if(sh.protection.protected)sh.protection.unprotect(pw);fullLock(sh,pw);await c.sync();setSecurityStatus(`Sheet "${sh.name}" full lock.`,false);});}catch(e){setSecurityStatus(errText(e),true);}}
+async function adminWorkingLock(){
+  try{
+    await checkPin();assertGlobalUnlockOff();
+    const pw=requireSecret();
+    const result=await Excel.run(async c=>{
+      const sh=c.workbook.worksheets.getActiveWorksheet();
+      sh.load("id,name,protection/protected");await c.sync();
+      if(sh.protection.protected){sh.protection.unprotect(pw);await c.sync();}
+      workingLock(sh,pw);await c.sync();
+      return {id:sh.id,name:sh.name};
+    });
+    // Admin expressly re-opened a working sheet, so cancel a prior FINAL
+    // manual-close marker. This is never done by background audits.
+    if(typeof hbClearExplicitCloseShift==="function")
+      await hbClearExplicitCloseShift(result.id);
+    setSecurityStatus('ADMIN — "'+result.name+
+      '" diaktifkan sebagai sheet kerja. Sheet lain tidak dibuka.',false);
+  }catch(e){setSecurityStatus(errText(e),true);}
+}
+async function adminFullLock(){
+  try{
+    await checkPin();assertGlobalUnlockOff();
+    const pw=requireSecret();
+    const identity=await Excel.run(async ctx=>{
+      const sh=ctx.workbook.worksheets.getActiveWorksheet();
+      sh.load("id,name");await ctx.sync();
+      return {id:sh.id,name:sh.name};
+    });
+    if(typeof hbMarkExplicitlyClosedShift!=="function")
+      throw new Error("Pengaman tutup shift belum siap. Buka ulang add-in.");
+    await hbMarkExplicitlyClosedShift(identity.id,identity.name);
+    await Excel.run(async c=>{
+      const sh=c.workbook.worksheets.getItem(identity.id);
+      sh.load("id,name,protection/protected");
+      await c.sync();
+      if(sh.protection.protected){sh.protection.unprotect(pw);await c.sync();}
+      fullLock(sh,pw);
+      await c.sync();
+    });
+    await hbAssertFullLock(identity.id);
+    if(typeof clearShiftWorkWindowState==="function"&&
+       String(getSetting("hitunganV4.shiftWorkSheetId")||"")===String(identity.id))
+      await clearShiftWorkWindowState();
+    setSecurityStatus('FULL LOCK TERVERIFIKASI — sheet "'+identity.name+
+      '" seluruh A1:AH500 terkunci. Koreksi otomatis tidak akan membuka kembali sheet ini.',false);
+  }catch(e){setSecurityStatus("GAGAL FULL LOCK: "+errText(e),true);}
+}
 async function adminUnlockStructure(){try{await checkPin();const pw=requireSecret();await Excel.run(async c=>{const wb=c.workbook;wb.protection.load("protected");await c.sync();if(wb.protection.protected)wb.protection.unprotect(pw);await c.sync();});if(relockTimer)clearTimeout(relockTimer);relockTimer=setTimeout(()=>enforceStructure().catch(()=>{}),120000);setSecurityStatus("ADMIN: struktur terbuka maksimal 2 menit. Delete/Rename aktif.",false);}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminLockStructure(){try{await checkPin();if(relockTimer)clearTimeout(relockTimer);relockTimer=null;await enforceStructure();setSecurityStatus("Struktur workbook dikunci kembali.",false);}catch(e){setSecurityStatus(errText(e),true);}}
 async function adminSync(){
