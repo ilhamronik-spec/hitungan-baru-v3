@@ -40,6 +40,7 @@ function installWrappers(){
     for(let attempt=0;attempt<30;attempt++){
       const maintenanceBusy=
         (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy)||
+        (typeof hbHistoricalLockAuditBusy!=="undefined"&&hbHistoricalLockAuditBusy)||
         (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
         (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy);
       if(!maintenanceBusy)break;
