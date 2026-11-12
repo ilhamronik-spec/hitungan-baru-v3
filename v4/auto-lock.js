@@ -710,36 +710,49 @@ function scheduleAdminSheetRelock(until) {
 }
 
 async function relockPendingAdminSheet() {
-  if (persistentAdminUnlockActive()) return;
-  const sheetId = getSetting(ADMIN_UNLOCK_SHEET_ID_KEY);
-  const sheetName = getSetting(ADMIN_UNLOCK_SHEET_NAME_KEY) || "sheet";
-  if (!sheetId) return;
-
-  try {
-    const pw = requireSecret();
-    const shouldReturnToWorking = isEmployeeWorkWindowActiveForSheet(sheetId);
-
-    const result = await Excel.run(async (context) => {
-      const wb = context.workbook;
-      const sh = wb.worksheets.getItem(sheetId);
-      sh.load("name,protection/protected");
+  if(persistentAdminUnlockActive())return;
+  const sheetId=getSetting(ADMIN_UNLOCK_SHEET_ID_KEY);
+  const sheetName=getSetting(ADMIN_UNLOCK_SHEET_NAME_KEY)||"sheet";
+  if(!sheetId)return;
+  try{
+    const pw=requireSecret();
+    const result=await Excel.run(async context=>{
+      const wb=context.workbook,sheets=wb.worksheets;
+      const sh=sheets.getItem(sheetId);
+      sheets.load("items/id,items/position");
+      sh.load("id,name,protection/protected");
       wb.protection.load("protected");
+      const area=sh.getRange(FULL_LOCK_AREA);
+      area.format.protection.load("locked");
       await context.sync();
-
-      if (!sh.protection.protected) {
-        if (shouldReturnToWorking) workingLock(sh, pw);
-        else fullLock(sh, pw);
-        if (!wb.protection.protected) wb.protection.protect(pw);
+      const latest=sheets.items.reduce((a,b)=>
+        Number(a.position)<Number(b.position)?a:b);
+      const working=isEmployeeWorkWindowActiveForSheet(sheetId)&&
+        String(sheetId)===String(latest.id)&&
+        !hbIsExplicitlyClosedShift(sheetId);
+      // "protected" is NOT equivalent to Full Lock. A previous correction
+      // exception or Working Lock may still leave inputs editable.
+      const requiresReLock=!sh.protection.protected||
+        (!working&&area.format.protection.locked!==true);
+      if(requiresReLock){
+        if(sh.protection.protected){sh.protection.unprotect(pw);await context.sync();}
+        if(working)workingLock(sh,pw);
+        else fullLock(sh,pw);
+        if(!wb.protection.protected)wb.protection.protect(pw);
         await context.sync();
       }
-      return sh.name;
+      return {id:sh.id,name:sh.name,working};
     });
-
+    if(!result.working)await hbAssertFullLock(result.id);
     await clearAdminSheetAutoLockState();
-    const mode = shouldReturnToWorking ? "sheet kerja (masih dalam 2,5 jam)" : "full lock";
-    setSecurityStatus(`AUTO-LOCK ADMIN: sheet "${result}" dikunci kembali sebagai ${mode}.`, false);
-  } catch (e) {
-    setSecurityStatus(`AUTO-LOCK admin belum berhasil untuk "${sheetName}". V4 akan mencoba lagi saat panel dibuka.`, true);
+    const mode=result.working?"sheet kerja (shift terbaru masih aktif)":"FULL LOCK TERVERIFIKASI";
+    setSecurityStatus('AUTO-LOCK ADMIN — sheet "'+result.name+
+      '" dikunci kembali sebagai '+mode+'.',false);
+  }catch(e){
+    setSecurityStatus('GAGAL mengunci kembali sheet "'+sheetName+
+      '": '+(e&&e.message||String(e))+
+      '. Timer admin tidak dihapus agar pemulihan dapat dicoba lagi.',true);
+    scheduleShiftAutoLockRetry();
   }
 }
 
