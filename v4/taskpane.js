@@ -544,25 +544,32 @@ async function adminSync(){
     const current=await Excel.run(async c=>{
       const wb=c.workbook,sheets=wb.worksheets;
       wb.protection.load("protected");
-      sheets.load("items/id,items/name,items/protection/protected");
+      sheets.load("items/id,items/name,items/position,items/protection/protected");
       await c.sync();
+      const newest=sheets.items.reduce((a,b)=>
+        Number(a.position)<Number(b.position)?a:b);
       if(wb.protection.protected)wb.protection.unprotect(pw);
       let workName="";
+      const closedIds=[];
       for(const sh of sheets.items){
         if(sh.protection.protected)sh.protection.unprotect(pw);
-        if(shiftValid&&String(sh.id)===shiftId){
+        if(shiftValid&&String(sh.id)===shiftId&&
+           String(sh.id)===String(newest.id)&&
+           !(typeof hbIsExplicitlyClosedShift==="function"&&hbIsExplicitlyClosedShift(sh.id))){
           workingLock(sh,pw);workName=sh.name;
         }else{
           fullLock(sh,pw);
+          closedIds.push(sh.id);
         }
       }
       wb.protection.protect(pw);
       await c.sync();
-      return workName;
+      return {workName,closedIds};
     });
-    setSecurityStatus(current?
-      "Sinkron selesai: '"+current+"' tetap sheet kerja karena 2,5 jam belum habis. Lainnya full lock.":
-      "Sinkron selesai: tidak ada shift aktif; seluruh sheet full lock.",false);
+    await hbAssertFullLocks(current.closedIds);
+    setSecurityStatus(current.workName?
+      "SINKRON TERVERIFIKASI: '"+current.workName+"' adalah satu-satunya sheet kerja; seluruh sheet lama FULL LOCK.":
+      "SINKRON TERVERIFIKASI: seluruh sheet FULL LOCK, tidak ada sheet lama yang boleh diedit.",false);
   }catch(e){setSecurityStatus(errText(e),true);}
 }
 
