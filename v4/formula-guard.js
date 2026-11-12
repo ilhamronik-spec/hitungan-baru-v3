@@ -778,6 +778,7 @@ Office.onReady(info=>{
       (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)||
       (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
       (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy)||
+      (typeof hbHistoricalLockAuditBusy!=="undefined"&&hbHistoricalLockAuditBusy)||
       Boolean(hbFormulaRunning);
     if(busy){
       if(++attempts<=8)setTimeout(passiveAudit,10000);
