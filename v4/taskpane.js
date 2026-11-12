@@ -272,15 +272,16 @@ async function setupSecurity(){
   try{
     await Excel.run(async c=>{
       const wb=c.workbook,sheets=wb.worksheets,active=sheets.getActiveWorksheet();
-      wb.protection.load("protected"); sheets.load("items/id,items/name,items/protection/protected"); active.load("id"); await c.sync();
+      wb.protection.load("protected"); sheets.load("items/id,items/name,items/position,items/protection/protected"); active.load("id"); await c.sync();
       if(wb.protection.protected){ if(!oldPw)throw new Error("Workbook sudah diproteksi. Isi password proteksi lama."); wb.protection.unprotect(oldPw); }
       for(const sh of sheets.items){ if(sh.protection.protected){ if(!oldPw)throw new Error(`Sheet "${sh.name}" sudah diproteksi. Isi password proteksi lama.`); sh.protection.unprotect(oldPw); } }
       await c.sync();
-      for(const sh of sheets.items){ if(sh.id===active.id)workingLock(sh,newPw); else fullLock(sh,newPw); }
+      const latest=sheets.items.reduce((a,b)=>Number(a.position)<Number(b.position)?a:b);
+      for(const sh of sheets.items){if(sh.id===latest.id)workingLock(sh,newPw);else fullLock(sh,newPw);}
       wb.protection.protect(newPw); await c.sync();
     });
     setSetting(CFG.pinHash,await sha256(p1)); setSetting(CFG.secret,newPw); setSetting(CFG.enabled,true); setSetting(CFG.globalUnlock,false); setSetting(CFG.version,"4.3.0"); await saveSettings(); secret=newPw;
-    by("setupPin").value="";by("setupPin2").value="";by("oldPassword").value="";setConfigured(true);setFormEnabled(true);setSecurityStatus("AMAN — V4 aktif. Sheet aktif=kerja, sheet lama=full lock, struktur=lock.",false);
+    by("setupPin").value="";by("setupPin2").value="";by("oldPassword").value="";setConfigured(true);setFormEnabled(true);setSecurityStatus("AMAN — V4 aktif. Hanya sheet terbaru=kerja; semua sheet lama=FULL LOCK.",false);
   }catch(e){setSecurityStatus(errText(e),true);}
 }
 
