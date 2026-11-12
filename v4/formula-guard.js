@@ -521,6 +521,7 @@ async function hbSyncCorrectionOnlyAccess(result){
   // settings. Failure to refresh must fail closed instead of granting access.
   if(typeof refreshShiftSettingsFromWorkbook==="function")
     await refreshShiftSettingsFromWorkbook();
+  if(typeof isGlobalUnlockMode==="function"&&isGlobalUnlockMode())return;
   // Explicit employee/admin close is FINAL: formula/margin corrections cannot
   // silently turn a deliberately closed shift back into an editable sheet.
   if(typeof hbIsExplicitlyClosedShift==="function"&&
