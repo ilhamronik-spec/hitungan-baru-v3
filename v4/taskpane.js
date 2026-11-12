@@ -56,13 +56,17 @@ function installWrappers(){
     }
     const formulaAudit=await hbVerifySourceFormulas(true);
     const pw=requireSecret();
-    let sourceName="";
+    let sourceName="",sourceWasFull=false;
     await Excel.run(async c=>{
       const wb=c.workbook, src=wb.worksheets.getActiveWorksheet(),sheets=wb.worksheets;
       wb.protection.load("protected");
       src.load("id,name,protection/protected");
+      const sourceMarker=src.getRange("A1");
+      sourceMarker.format.protection.load("locked");
       sheets.load("items/name");
-      await c.sync(); sourceName=src.name;
+      await c.sync();
+      sourceName=src.name;
+      sourceWasFull=Boolean(src.protection.protected&&sourceMarker.format.protection.locked===true);
       if(sheets.items.some(sh=>String(sh.name).trim().toLowerCase()===
           String(sheetName).trim().toLowerCase())){
         throw new Error('Sheet "'+sheetName+'" SUDAH ADA. Jangan buat ulang karena dapat menyebabkan stok dan hitungan ganda. Periksa hasil sheet yang sudah terbuat.');
@@ -148,7 +152,16 @@ function installWrappers(){
       );
       return result;
     }catch(err){
-      await failClosedRecovery(sourceName,sheetName,pw);
+      // If cloning failed after the target was added, leave BOTH source
+      // and target FULL LOCK, never reopen the historical source.
+      try{
+        await failClosedRecovery(sourceName,sheetName,pw,sourceWasFull);
+      }catch(recoveryErr){
+        throw new Error("Pembuatan sheet belum tuntas ("+
+          (err.message||String(err))+"). PEMULIHAN PROTEKSI JUGA GAGAL: "+
+          (recoveryErr.message||String(recoveryErr))+
+          ". Jangan mengedit kedua sheet sampai Admin memeriksa proteksinya.");
+      }
       throw err;
     }
     }finally{
@@ -167,21 +180,38 @@ function installWrappers(){
   }
 }
 
-async function failClosedRecovery(sourceName,newName,pw){
-  try{
-    await Excel.run(async c=>{
-      const wb=c.workbook,sheets=wb.worksheets; wb.protection.load("protected"); sheets.load("items/name,items/protection/protected"); await c.sync();
-      for(const sh of sheets.items){
-        if(sh.protection.protected){ try{ sh.protection.unprotect(pw); }catch(_){} }
-        if(!isGlobalUnlockMode()){
-          if(sh.name===sourceName) workingLock(sh,pw);
-          else if(sh.name===newName) fullLock(sh,pw);
-        }
+async function failClosedRecovery(sourceName,newName,pw,sourceWasFull=false){
+  if(!sourceName)throw new Error("Identitas sheet sumber tidak tersedia.");
+  const recovery=await Excel.run(async c=>{
+    const wb=c.workbook,sheets=wb.worksheets;
+    wb.protection.load("protected");
+    sheets.load("items/id,items/name,items/protection/protected");
+    await c.sync();
+    const source=sheets.items.find(sh=>sh.name===sourceName);
+    const created=sheets.items.find(sh=>sh.name===newName);
+    if(!source)throw new Error('Sheet sumber "'+sourceName+'" tidak ditemukan.');
+    // Never unprotect unrelated worksheets during error recovery.
+    const targets=created?[source,created]:[source];
+    for(const sh of targets){
+      if(sh.protection.protected){
+        sh.protection.unprotect(pw);
+        await c.sync();
       }
-      if(!wb.protection.protected) wb.protection.protect(pw);
-      await c.sync();
-    });
-  }catch(_){ }
+      // Any already-created shift (even a partial one) becomes FULL LOCK
+      // pending Admin review. The old source is NEVER a working sheet again.
+      if(created || sourceWasFull)fullLock(sh,pw);
+      else workingLock(sh,pw); // No new sheet: restore existing working shift.
+    }
+    if(!wb.protection.protected)wb.protection.protect(pw);
+    await c.sync();
+    return {created:Boolean(created),sourceId:source.id,targetId:created&&created.id};
+  });
+  if(recovery.created){
+    await hbAssertFullLock(recovery.sourceId);
+    await hbAssertFullLock(recovery.targetId);
+    if(typeof setSecurityStatus==="function")
+      setSecurityStatus("PEMULIHAN AMAN — sheet sumber dan sheet baru sementara FULL LOCK. Jangan buat duplikat; periksa hasil sheet baru melalui Admin.",true);
+  }else if(sourceWasFull)await hbAssertFullLock(recovery.sourceId);
 }
 
 function startSecurityUi(){
