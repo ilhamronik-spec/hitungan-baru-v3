@@ -490,7 +490,7 @@ async function expireShiftWorkWindow() {
       const wb=ctx.workbook,sh=wb.worksheets.getItem(sheetId);
       sh.load("name,protection/protected");
       wb.protection.load("protected");
-      const proof=sh.getRange("A1");
+      const proof=sh.getRange(FULL_LOCK_AREA);
       proof.format.protection.load("locked");
       await ctx.sync();
       // Protected alone does not mean full lock. WorkingLock also protects.
@@ -507,9 +507,10 @@ async function expireShiftWorkWindow() {
       proof.format.protection.load("locked");
       await ctx.sync();
       if(!sh.protection.protected || proof.format.protection.locked!==true)
-        throw new Error("Excel belum mengonfirmasi FULL LOCK; penguncian akan diulang.");
+        throw new Error("Excel belum mengonfirmasi FULL LOCK A1:AH500; penguncian akan diulang.");
       return sh.name;
     });
+    await hbAssertFullLock(sheetId);
     await clearShiftWorkWindowState();
     if(shiftAutoLockRetryTimer)clearTimeout(shiftAutoLockRetryTimer);
     shiftAutoLockRetryTimer=null;
