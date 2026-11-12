@@ -626,53 +626,85 @@ async function adminUnlockAllSheets(){
 async function adminLockAllSheets(){
   try{
     await checkPin();
-    await lockAllSheetsCore();
+    // A deliberate click on KUNCI SEMUA KEMBALI means ALL worksheets, including
+    // the current shift. An automatic 90-minute timeout still keeps a truly
+    // active newest shift editable under the original timing rules.
+    await lockAllSheetsCore(null,true);
   }catch(e){setSecurityStatus(errText(e),true);}
 }
 
-async function lockAllSheetsCore(statusOverride){
+async function lockAllSheetsCore(statusOverride,forceFull=false){
   try{
     const pw=requireSecret();
-    const shiftId=getSetting("hitunganV4.shiftWorkSheetId");
+    const shiftId=String(getSetting("hitunganV4.shiftWorkSheetId")||"");
     const shiftUntil=Number(getSetting("hitunganV4.shiftWorkUntil"));
-    const validShift=Boolean(shiftId&&Number.isFinite(shiftUntil)&&Date.now()<shiftUntil);
-    setSecurityStatus("ADMIN: mengunci kembali seluruh sheet…",false);
+    const validShift=!forceFull&&Boolean(shiftId&&Number.isFinite(shiftUntil)&&
+      shiftUntil>Date.now());
+    if(forceFull){
+      const latest=await Excel.run(async c=>{
+        const ss=c.workbook.worksheets;
+        ss.load("items/id,items/name,items/position");await c.sync();
+        if(!ss.items.length)throw new Error("Workbook tidak memiliki sheet.");
+        const sh=ss.items.reduce((a,b)=>Number(a.position)<Number(b.position)?a:b);
+        return {id:sh.id,name:sh.name};
+      });
+      if(typeof hbMarkExplicitlyClosedShift!=="function")
+        throw new Error("Pengaman Full Lock manual belum termuat. Buka ulang add-in.");
+      await hbMarkExplicitlyClosedShift(latest.id,latest.name);
+    }
+    setSecurityStatus("ADMIN: mengunci dan memverifikasi seluruh sheet…",false);
     const result=await Excel.run(async c=>{
       const wb=c.workbook,sheets=wb.worksheets;
       wb.protection.load("protected");
-      sheets.load("items/id,items/name,items/protection/protected");
+      sheets.load("items/id,items/name,items/position,items/protection/protected");
       await c.sync();
-      if(wb.protection.protected) wb.protection.unprotect(pw);
+      const newest=sheets.items.reduce((a,b)=>
+        Number(a.position)<Number(b.position)?a:b);
+      if(wb.protection.protected)wb.protection.unprotect(pw);
       let workingName="";
+      const closedIds=[];
       for(const sh of sheets.items){
-        if(sh.protection.protected) sh.protection.unprotect(pw);
-        if(validShift&&String(sh.id)===String(shiftId)){
-          // Current shift remains readable while its normal input window lasts.
+        if(sh.protection.protected){
+          sh.protection.unprotect(pw);
+          await c.sync();
+        }
+        // Never re-open an old sheet on the basis of a stale shift timer.
+        const keepWorking=validShift&&String(sh.id)===shiftId&&
+          String(sh.id)===String(newest.id)&&
+          !(typeof hbIsExplicitlyClosedShift==="function"&&hbIsExplicitlyClosedShift(sh.id));
+        if(keepWorking){
           revealMinusCellsForAdmin(sh);
           workingLock(sh,pw);
           workingName=sh.name;
         }else{
           fullLock(sh,pw);
+          closedIds.push(sh.id);
         }
       }
-      wb.protection.protect(pw);
+      if(!wb.protection.protected)wb.protection.protect(pw);
       await c.sync();
-      return workingName;
+      return {workingName,closedIds};
     });
+    await hbAssertFullLocks(result.closedIds);
+    // Do not claim completion or clear any timer before readback succeeds.
     setSetting(CFG.globalUnlock,false);
     await saveSettings();
-    if(typeof clearGlobalUnlockWindowState==="function") await clearGlobalUnlockWindowState();
-    if(!validShift&&typeof clearShiftWorkWindowState==="function"){
-      try{await clearShiftWorkWindowState();}catch(_){}
-    }
+    if(typeof clearGlobalUnlockWindowState==="function")
+      await clearGlobalUnlockWindowState();
+    if((forceFull||!result.workingName)&&typeof clearShiftWorkWindowState==="function")
+      await clearShiftWorkWindowState();
     setGlobalUnlockUi(false);
-    setSecurityStatus(
-      statusOverride || (result
-        ? `MODE NORMAL — semua sheet dikunci kembali; "${result}" tetap sebagai sheet kerja karena shift masih aktif.`
-        : "MODE NORMAL — seluruh sheet sudah FULL LOCK dan struktur workbook terkunci kembali."),
-      false
-    );
-  }catch(e){setSecurityStatus(errText(e),true);throw e;}
+    setSecurityStatus(statusOverride || (forceFull
+      ? "KUNCI SEMUA TERVERIFIKASI — seluruh sheet FULL LOCK, termasuk sheet terbaru. Koreksi otomatis tidak boleh membuka kembali."
+      :result.workingName
+        ?'MODE NORMAL TERVERIFIKASI — "'+result.workingName+
+          '" satu-satunya sheet kerja; sheet lama semuanya FULL LOCK.'
+        :"MODE NORMAL TERVERIFIKASI — seluruh sheet FULL LOCK."),
+      false);
+  }catch(e){
+    setSecurityStatus("GAGAL MENGUNCI SEMUA: "+errText(e),true);
+    throw e;
+  }
 }
 
 async function ensureAllSheetsUnlocked(){
