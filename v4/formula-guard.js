@@ -517,6 +517,10 @@ async function hbPaintFormulaIssues(result){
 async function hbSyncCorrectionOnlyAccess(result){
   if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
   if(typeof isGlobalUnlockMode==="function"&&isGlobalUnlockMode())return;
+  // Explicit employee/admin close is FINAL: formula/margin corrections cannot
+  // silently turn a deliberately closed shift back into an editable sheet.
+  if(typeof hbIsExplicitlyClosedShift==="function"&&
+     hbIsExplicitlyClosedShift(result.sheetId))return;
   const desired=hbCorrectionTargets(result.issues);
   const desiredSet=new Set(desired);
   const journal=hbCorrectionAccessJournal();
