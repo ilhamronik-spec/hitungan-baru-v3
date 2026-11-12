@@ -371,6 +371,27 @@ function fullLock(sh,pw){
   maskMinusCells(sh);
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.none,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
+async function hbAssertFullLocks(sheetIds){
+  const unique=[...new Set((sheetIds||[]).map(String))];
+  if(!unique.length)return [];
+  return Excel.run(async c=>{
+    const probes=unique.map(id=>{
+      const sh=c.workbook.worksheets.getItem(id);
+      sh.load("id,name,protection/protected");
+      const area=sh.getRange(FULL_LOCK_AREA);
+      area.format.protection.load("locked");
+      return {sh,area};
+    });
+    await c.sync();
+    const failed=probes.filter(({sh,area})=>
+      !sh.protection.protected||area.format.protection.locked!==true)
+      .map(({sh,area})=>sh.name+" (protected="+sh.protection.protected+
+        ", allLocked="+area.format.protection.locked+")");
+    if(failed.length)
+      throw new Error("PENGUNCIAN BELUM SELESAI untuk: "+failed.join("; "));
+    return probes.map(({sh})=>({id:sh.id,name:sh.name}));
+  });
+}
 async function hbAssertFullLock(sheetId){
   return Excel.run(async c=>{
     const sh=c.workbook.worksheets.getItem(sheetId);
