@@ -351,7 +351,8 @@ async function hbMarginReadSheets(){
 
 async function hbMarginReconcileAll(manual=false){
   if((typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
-     (typeof hbFormulaAuditBusy!=="undefined"&&hbFormulaAuditBusy)){
+     (typeof hbFormulaAuditBusy!=="undefined"&&hbFormulaAuditBusy)||
+     (typeof hbHistoricalLockAuditBusy!=="undefined"&&hbHistoricalLockAuditBusy)){
     hbMarginStatus("Menunggu pembuatan shift / pemeriksaan rumus selesai sebelum memeriksa warna.");
     hbMarginQueueRetry(12000);
     return;
