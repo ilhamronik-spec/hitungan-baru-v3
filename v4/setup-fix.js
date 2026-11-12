@@ -47,10 +47,7 @@ async function setupSecurityFixed() {
     await Excel.run(async (context) => {
       const wb = context.workbook;
       const sheets = wb.worksheets;
-      const active = sheets.getActiveWorksheet();
-
-      sheets.load("items/id,items/name,items/protection/protected");
-      active.load("id,name");
+      sheets.load("items/id,items/name,items/position,items/protection/protected");
       wb.protection.load("protected");
       await context.sync();
 
@@ -64,8 +61,12 @@ async function setupSecurityFixed() {
         throw new Error(`Masih ada sheet terproteksi: ${stillProtected.map(s => s.name).join(", ")}`);
       }
 
+      // A setup initiated from a historical tab must never leave that
+      // historical tab editable. Only the leftmost latest sheet can work.
+      const latest=sheets.items.reduce((a,b)=>
+        Number(a.position)<Number(b.position)?a:b);
       for (const sh of sheets.items) {
-        if (sh.id === active.id) workingLock(sh, newPw);
+        if (sh.id === latest.id) workingLock(sh, newPw);
         else fullLock(sh, newPw);
       }
       wb.protection.protect(newPw);
@@ -85,7 +86,7 @@ async function setupSecurityFixed() {
     document.getElementById("oldPassword").value = "";
     setConfigured(true);
     setFormEnabled(true);
-    setSecurityStatus("AMAN — V4 aktif. Sheet aktif = kerja; sheet lama = full lock; struktur = lock.", false);
+    setSecurityStatus("AMAN — V4 aktif. Hanya sheet terbaru sebagai sheet kerja; semua sheet lama FULL LOCK.", false);
   } catch (e) {
     setSecurityStatus(friendlyMigrationError(e), true);
   }
