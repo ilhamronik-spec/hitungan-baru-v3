@@ -74,6 +74,16 @@ async function employeeFallbackCloseLatestSheet() {
     }
 
     const pw = requireSecret();
+    const identity=await Excel.run(async ctx=>{
+      const sheet=ctx.workbook.worksheets.getActiveWorksheet();
+      sheet.load("id,name,position");
+      await ctx.sync();
+      if(sheet.position!==0)throw new Error("Hanya sheet terbaru yang boleh ditutup melalui tombol Karyawan.");
+      return {id:sheet.id,name:sheet.name};
+    });
+    if(typeof hbMarkExplicitlyClosedShift!=="function")
+      throw new Error("Pengaman Full Lock manual belum siap. Buka ulang add-in.");
+    await hbMarkExplicitlyClosedShift(identity.id,identity.name);
     const result = await Excel.run(async (context) => {
       const wb = context.workbook;
       const active = wb.worksheets.getActiveWorksheet();
@@ -96,8 +106,11 @@ async function employeeFallbackCloseLatestSheet() {
       return active.name;
     });
 
+    if(typeof hbAssertFullLock!=="function")
+      throw new Error("Pemeriksaan Full Lock tidak tersedia. Muat ulang add-in.");
+    await hbAssertFullLock(identity.id);
     if (typeof clearShiftWorkWindowState === "function") {
-      try { await clearShiftWorkWindowState(); } catch (_) {}
+      await clearShiftWorkWindowState();
     }
 
     const btn = document.getElementById("employeeCloseShiftBtn");
