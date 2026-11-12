@@ -19,6 +19,27 @@ const SHIFT_SHEET_ID_KEY = "hitunganV4.shiftWorkSheetId";
 const SHIFT_SHEET_NAME_KEY = "hitunganV4.shiftWorkSheetName";
 const SHIFT_CREATED_AT_KEY = "hitunganV4.shiftCreatedAt";
 const SHIFT_UNTIL_KEY = "hitunganV4.shiftWorkUntil";
+const HB_EXPLICIT_CLOSE_KEY = "hitunganV4.explicitlyClosedSheetsV1";
+function hbIsExplicitlyClosedShift(id){
+  const records=typeof getSetting==="function"?getSetting(HB_EXPLICIT_CLOSE_KEY):null;
+  return Array.isArray(records)&&records.some(x=>x&&String(x.id)===String(id));
+}
+async function hbMarkExplicitlyClosedShift(id,name){
+  if(!id)throw new Error("Identitas sheet untuk Full Lock manual tidak tersedia.");
+  const raw=getSetting(HB_EXPLICIT_CLOSE_KEY);
+  const rows=(Array.isArray(raw)?raw:[]).filter(x=>x&&String(x.id)!==String(id));
+  rows.push({id:String(id),name:String(name||""),closedAt:Date.now()});
+  setSetting(HB_EXPLICIT_CLOSE_KEY,rows.slice(-30));
+  await saveSettings();
+}
+async function hbClearExplicitCloseShift(id){
+  const raw=getSetting(HB_EXPLICIT_CLOSE_KEY);
+  if(!Array.isArray(raw))return;
+  const remaining=raw.filter(x=>x&&String(x.id)!==String(id));
+  if(remaining.length===raw.length)return;
+  setSetting(HB_EXPLICIT_CLOSE_KEY,remaining);
+  await saveSettings();
+}
 
 let adminSheetRelockTimer = null;
 let shiftWorkRelockTimer = null;
