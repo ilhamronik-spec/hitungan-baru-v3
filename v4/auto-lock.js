@@ -76,7 +76,90 @@ Office.onReady((info) => {
     auditShiftAutoLock().catch(e => shiftSecurityError("Pemeriksaan Full Lock",e));
   }, 30000);
   setTimeout(() => auditShiftAutoLock().catch(e => shiftSecurityError("Pemeriksaan awal",e)), 1100);
+  hbScheduleHistoricalLockAudit(24000);
 });
+
+let hbHistoricalLockAuditBusy=false;
+let hbHistoricalAuditRetry=0;
+function hbHistoryAuditBusy(){
+  return hbHistoricalLockAuditBusy||hbShiftPipelineBusy||
+    (typeof shiftCreationInProgress!=="undefined"&&shiftCreationInProgress)||
+    (typeof hbFormulaAuditBusy!=="undefined"&&hbFormulaAuditBusy)||
+    (typeof adminGlobalUnmaskBusy!=="undefined"&&adminGlobalUnmaskBusy)||
+    (typeof minesRecoveryBusy!=="undefined"&&minesRecoveryBusy)||
+    (typeof hbMarginColorBusy!=="undefined"&&hbMarginColorBusy);
+}
+// An old sheet must NEVER be a second working sheet. Background audits do
+// one read-only inspection first and modify ONLY sheets that have demonstrably
+// lost Full Lock. Temporarily Admin-unlocked sheets are skipped until expiry.
+async function hbVerifyAndRepairHistoricalFullLocks(){
+  if(persistentAdminUnlockActive()||hbHistoryAuditBusy())return {deferred:true};
+  if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)
+    return {deferred:true};
+  hbHistoricalLockAuditBusy=true;
+  try{
+    const adminId=String(getSetting(ADMIN_UNLOCK_SHEET_ID_KEY)||"");
+    const adminUntil=Number(getSetting(ADMIN_UNLOCK_UNTIL_KEY));
+    const exclude=adminId&&Number.isFinite(adminUntil)&&adminUntil>Date.now()
+      ?adminId:null;
+    const inspection=await Excel.run(async ctx=>{
+      const sheets=ctx.workbook.worksheets;
+      sheets.load("items/id,items/name,items/position,items/protection/protected");
+      await ctx.sync();
+      if(!sheets.items.length)return [];
+      const latest=sheets.items.reduce((a,b)=>
+        Number(a.position)<Number(b.position)?a:b);
+      const probes=sheets.items.filter(sh=>
+        String(sh.id)!==String(latest.id) ||
+        (typeof hbIsExplicitlyClosedShift==="function"&&hbIsExplicitlyClosedShift(sh.id))
+      ).filter(sh=>String(sh.id)!==exclude).map(sh=>{
+        const area=sh.getRange(FULL_LOCK_AREA);
+        area.format.protection.load("locked");
+        return {sh,area};
+      });
+      await ctx.sync();
+      return probes.map(({sh,area})=>({
+        id:sh.id,name:sh.name,
+        needsLock:!sh.protection.protected||area.format.protection.locked!==true
+      }));
+    });
+    const broken=inspection.filter(x=>x.needsLock);
+    if(!broken.length)return {repaired:0,checked:inspection.length};
+    const pw=requireSecret();
+    for(const entry of broken){
+      await Excel.run(async ctx=>{
+        const wb=ctx.workbook,sh=wb.worksheets.getItem(entry.id);
+        sh.load("name,protection/protected");
+        wb.protection.load("protected");
+        await ctx.sync();
+        if(sh.protection.protected){sh.protection.unprotect(pw);await ctx.sync();}
+        fullLock(sh,pw);
+        if(!wb.protection.protected)wb.protection.protect(pw);
+        await ctx.sync();
+      });
+    }
+    await hbAssertFullLocks(inspection.map(x=>x.id));
+    setSecurityStatus("PENGAMAN HISTORIS: "+broken.length+
+      " sheet yang sebelumnya terbuka berhasil dipulihkan ke FULL LOCK dan diverifikasi: "+
+      broken.slice(0,5).map(x=>x.name).join(", ")+".",false);
+    return {repaired:broken.length,checked:inspection.length};
+  }finally{
+    hbHistoricalLockAuditBusy=false;
+  }
+}
+function hbScheduleHistoricalLockAudit(delay=18000){
+  setTimeout(async()=>{
+    try{
+      const state=await hbVerifyAndRepairHistoricalFullLocks();
+      if(state&&state.deferred&&hbHistoricalAuditRetry++<5)
+        hbScheduleHistoricalLockAudit(16000);
+      else hbHistoricalAuditRetry=0;
+    }catch(e){
+      shiftSecurityError("Audit Full Lock sheet lama",e);
+      if(hbHistoricalAuditRetry++<5)hbScheduleHistoricalLockAudit(16000);
+    }
+  },delay);
+}
 
 function shiftSecurityError(label,e){
   const reason=e&&e.message?e.message:String(e||"Kesalahan tidak diketahui");
@@ -257,6 +340,7 @@ function waitAndWrapShiftCreate() {
 
       const previousCreate = createNewDaySheet;
       createNewDaySheet = async function(person, sheetName, purchaseData) {
+        let createdSuccessfully=false;
         if(hbShiftPipelineBusy)
           throw new Error("Pembuatan shift lain masih diproses. Tunggu hingga seluruh stok dan harga selesai disimpan.");
         hbShiftPipelineBusy=true;
@@ -290,9 +374,11 @@ function waitAndWrapShiftCreate() {
               ". Harga pending tetap disimpan. Jangan buat sheet baru lagi; gunakan Menu Admin untuk perbaikan.",true);
           }
         }
+        createdSuccessfully=true;
         return result;
         }finally{
           hbShiftPipelineBusy=false;
+          if(createdSuccessfully)hbScheduleHistoricalLockAudit(5000);
         }
       };
 
