@@ -4,6 +4,7 @@ const V2_SCRIPT = "https://hitungan-baru-excel-ilham.bienbachthuatz2.chatgpt.sit
 const CFG = { enabled:"hitunganV4.enabled", pinHash:"hitunganV4.pinHash", secret:"hitunganV4.secret", version:"hitunganV4.version", globalUnlock:"hitunganV4.globalUnlockAll" };
 const LEGACY_V3_SECRET_KEY = "hitunganV3.secret";
 const WORK_AREA = "A1:AH400";
+const FULL_LOCK_AREA = "A1:AH500"; // Includes debt rows 401–427 and buffers.
 const LOCK_RANGES = [
   "B267","B269","B271:B275","G272:G275","B178:B238","C178:C238","F178:F238","K178:K238","L178:L238","M178:M238","N178:N238","O178:O238",
   "N163","B6:B75","C6:C75","D6:D75","F6:F75","G6:G75","H6:H75","M23","L50","K75","L75","H76:H79","B114:B116",
@@ -332,9 +333,29 @@ async function restoreMinesReadableNumbers(context,sh,activeSheet=false){
   return {restored,shown};
 }
 function fullLock(sh,pw){
-  const w=sh.getRange(WORK_AREA); w.format.protection.locked=true; w.format.protection.formulaHidden=true;
+  // Unlike Working Lock, Full Lock also covers the debtor/transaction rows
+  // below 400, which previously could remain writable.
+  const w=sh.getRange(FULL_LOCK_AREA);
+  w.format.protection.locked=true;
+  w.format.protection.formulaHidden=true;
   maskMinusCells(sh);
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.none,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
+}
+async function hbAssertFullLock(sheetId){
+  return Excel.run(async c=>{
+    const sh=c.workbook.worksheets.getItem(sheetId);
+    sh.load("id,name,protection/protected");
+    const span=sh.getRange(FULL_LOCK_AREA);
+    span.format.protection.load("locked");
+    await c.sync();
+    if(!sh.protection.protected||span.format.protection.locked!==true){
+      throw new Error('Full Lock sheet "'+sh.name+
+        '" BELUM berhasil: sheet terlindungi='+
+        sh.protection.protected+', semua sel A1:AH500 terkunci='+
+        span.format.protection.locked+'. Jangan menganggap sheet sudah aman.');
+    }
+    return {id:sh.id,name:sh.name};
+  });
 }
 // Reconcile older worksheets already locked before the masking feature existed.
 // Never clear or replace source values/formulas; only apply display formatting.
