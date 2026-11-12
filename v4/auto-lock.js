@@ -99,6 +99,9 @@ async function hbVerifyAndRepairHistoricalFullLocks(){
     return {deferred:true};
   hbHistoricalLockAuditBusy=true;
   try{
+    // Read current workbook settings to respect an Admin correction window or
+    // a manual final close initiated on another device.
+    await refreshShiftSettingsFromWorkbook();
     const adminId=String(getSetting(ADMIN_UNLOCK_SHEET_ID_KEY)||"");
     const adminUntil=Number(getSetting(ADMIN_UNLOCK_UNTIL_KEY));
     const exclude=adminId&&Number.isFinite(adminUntil)&&adminUntil>Date.now()
