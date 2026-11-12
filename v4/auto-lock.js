@@ -452,6 +452,17 @@ async function employeeCloseShiftNow() {
     if (!sheetId) throw new Error("Tidak ada sheet kerja aktif yang bisa ditutup.");
 
     const pw = requireSecret();
+    const selected=await Excel.run(async context=>{
+      const active=context.workbook.worksheets.getActiveWorksheet();
+      active.load("id,name");
+      await context.sync();
+      return {id:active.id,name:active.name};
+    });
+    if(String(selected.id)!==String(sheetId))
+      throw new Error('Buka sheet kerja "'+sheetName+'" dahulu sebelum menutup shift.');
+    // Save explicit intent BEFORE applying protection so any onChanged
+    // audit cannot quietly reopen the sheet during the close operation.
+    await hbMarkExplicitlyClosedShift(sheetId,selected.name);
     const result = await Excel.run(async (context) => {
       const wb = context.workbook;
       const active = wb.worksheets.getActiveWorksheet();
@@ -474,9 +485,10 @@ async function employeeCloseShiftNow() {
       return active.name;
     });
 
+    await hbAssertFullLock(sheetId);
     await clearShiftWorkWindowState();
     await refreshShiftUi();
-    setSecurityStatus(`SHIFT DITUTUP — sheet "${result}" sudah FULL LOCK oleh karyawan. Perubahan berikutnya memerlukan Admin/PIN.`, false);
+    setSecurityStatus(`SHIFT DITUTUP — sheet "${result}" FULL LOCK TERVERIFIKASI pada seluruh area. Akses koreksi otomatis tidak dapat membuka sheet ini lagi.`, false);
   } catch (e) {
     setSecurityStatus(errText(e), true);
   }
