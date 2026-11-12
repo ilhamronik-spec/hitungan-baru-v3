@@ -157,7 +157,8 @@ async function restoreActiveShiftMines(){
 
 async function reconcileMinesMasks(manual=false){
   if((typeof hbShiftPipelineBusy!=="undefined"&&hbShiftPipelineBusy)||
-     (typeof hbFormulaAuditBusy!=="undefined"&&hbFormulaAuditBusy)){
+     (typeof hbFormulaAuditBusy!=="undefined"&&hbFormulaAuditBusy)||
+     (typeof hbHistoricalLockAuditBusy!=="undefined"&&hbHistoricalLockAuditBusy)){
     updateMinesRecoveryStatus("Menunggu proses sheet baru / pemeriksaan rumus selesai...",false);
     scheduleMinesRecovery(12000);
     return;
