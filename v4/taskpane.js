@@ -58,6 +58,7 @@ function installWrappers(){
     const formulaAudit=await hbVerifySourceFormulas(true);
     const pw=requireSecret();
     let sourceName="",sourceWasFull=false;
+    try{
     await Excel.run(async c=>{
       const wb=c.workbook, src=wb.worksheets.getActiveWorksheet(),sheets=wb.worksheets;
       wb.protection.load("protected");
@@ -82,6 +83,18 @@ function installWrappers(){
       if(src.protection.protected) src.protection.unprotect(pw);
       await c.sync();
     });
+    }catch(prepareError){
+      // If unprotect succeeded but a later Excel synchronization failed,
+      // the source must never be left open simply because V2 copy did not run.
+      if(sourceName){
+        try{await failClosedRecovery(sourceName,sheetName,pw,sourceWasFull);}
+        catch(recoveryError){
+          throw new Error("Persiapan sheet gagal: "+(prepareError.message||prepareError)+
+            "; pemulihan kunci juga gagal: "+(recoveryError.message||recoveryError));
+        }
+      }
+      throw prepareError;
+    }
     try{
       const result=await originalCreate(person,sheetName,purchaseData);
       let pricingResult={applied:[],skipped:[],alerts:[]};
