@@ -492,8 +492,14 @@ async function adminWorkingLock(){
     await checkPin();assertGlobalUnlockOff();
     const pw=requireSecret();
     const result=await Excel.run(async c=>{
-      const sh=c.workbook.worksheets.getActiveWorksheet();
-      sh.load("id,name,protection/protected");await c.sync();
+      const sheets=c.workbook.worksheets,sh=sheets.getActiveWorksheet();
+      sh.load("id,name,protection/protected");
+      sheets.load("items/id,items/position");
+      await c.sync();
+      const latest=sheets.items.reduce((a,b)=>
+        Number(a.position)<Number(b.position)?a:b);
+      if(String(sh.id)!==String(latest.id))
+        throw new Error("Sheet lama tidak boleh masuk Working Lock. Hanya sheet TERBARU yang dapat diaktifkan sebagai sheet kerja; gunakan Buka Sheet Aktif untuk koreksi sementara melalui Admin.");
       if(sh.protection.protected){sh.protection.unprotect(pw);await c.sync();}
       workingLock(sh,pw);await c.sync();
       return {id:sh.id,name:sh.name};
