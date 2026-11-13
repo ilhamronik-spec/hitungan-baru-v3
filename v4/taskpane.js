@@ -4,7 +4,11 @@ const V2_SCRIPT = "https://hitungan-baru-excel-ilham.bienbachthuatz2.chatgpt.sit
 const CFG = { enabled:"hitunganV4.enabled", pinHash:"hitunganV4.pinHash", secret:"hitunganV4.secret", version:"hitunganV4.version", globalUnlock:"hitunganV4.globalUnlockAll" };
 const LEGACY_V3_SECRET_KEY = "hitunganV3.secret";
 const WORK_AREA = "A1:AH400";
-const FULL_LOCK_AREA = "A1:AH500"; // Includes debt rows 401–427 and buffers.
+// The original 400-row work grid was stable in Excel Online. The larger
+// A1:AH500 protection *readback* added in V6.3.3 produced Invalid API errors.
+const FULL_LOCK_AREA="A1:AH400";
+const FULL_LOCK_TAIL_AREA="A401:AH427";
+const FULL_LOCK_PROBES=["A1","A12","D75","B178","F178","K238","D275","B400","B427"];
 const LOCK_RANGES = [
   "B267","B269","B271:B275","G272:G275","B178:B238","C178:C238","F178:F238","K178:K238","L178:L238","M178:M238","N178:N238","O178:O238",
   "N163","B6:B75","C6:C75","D6:D75","F6:F75","G6:G75","H6:H75","M23","L50","K75","L75","H76:H79","B114:B116",
@@ -383,9 +387,18 @@ function fullLock(sh,pw){
   const w=sh.getRange(FULL_LOCK_AREA);
   w.format.protection.locked=true;
   w.format.protection.formulaHidden=true;
+  // Separate smaller write for the debt rows outside the 400-row work grid.
+  // Never read protection over the entire 17,000-cell rectangle.
+  const tail=sh.getRange(FULL_LOCK_TAIL_AREA);
+  tail.format.protection.locked=true;
+  tail.format.protection.formulaHidden=true;
   maskMinusCells(sh);
   sh.protection.protect({selectionMode:Excel.ProtectionSelectionMode.none,allowFormatCells:false,allowFormatColumns:false,allowFormatRows:false,allowInsertColumns:false,allowInsertRows:false,allowDeleteColumns:false,allowDeleteRows:false},pw);
 }
+// Read only representative LOCKED CELL properties. Excel.FormatProtection
+// exposes null for mixed-format ranges and Excel Online may reject huge
+// protection readbacks. A worksheet must be protected AND each protected
+// working region must have locked sentinels. No values/formulas are changed.
 async function hbAssertFullLocks(sheetIds){
   const unique=[...new Set((sheetIds||[]).map(String))];
   if(!unique.length)return [];
@@ -393,36 +406,34 @@ async function hbAssertFullLocks(sheetIds){
     const probes=unique.map(id=>{
       const sh=c.workbook.worksheets.getItem(id);
       sh.load("id,name,protection/protected");
-      const area=sh.getRange(FULL_LOCK_AREA);
-      area.format.protection.load("locked");
-      return {sh,area};
+      const cells=FULL_LOCK_PROBES.map(address=>{
+        const cell=sh.getRange(address);
+        cell.format.protection.load("locked");
+        return {address,cell};
+      });
+      return {sh,cells};
     });
     await c.sync();
-    const failed=probes.filter(({sh,area})=>
-      !sh.protection.protected||area.format.protection.locked!==true)
-      .map(({sh,area})=>sh.name+" (protected="+sh.protection.protected+
-        ", allLocked="+area.format.protection.locked+")");
-    if(failed.length)
-      throw new Error("PENGUNCIAN BELUM SELESAI untuk: "+failed.join("; "));
+    const failures=[];
+    for(const {sh,cells} of probes){
+      if(!sh.protection.protected){
+        failures.push(sh.name+" (protection OFF)");
+        continue;
+      }
+      const bad=cells.filter(({cell})=>cell.format.protection.locked!==true);
+      if(bad.length)failures.push(sh.name+" (sel terbuka: "+
+        bad.map(x=>x.address).join(", ")+")");
+    }
+    if(failures.length)throw new Error("FULL LOCK BELUM TERBUKTI: "+
+      failures.join("; ")+". Area wajib A1:AH400 dan A401:AH427.");
     return probes.map(({sh})=>({id:sh.id,name:sh.name}));
   });
 }
 async function hbAssertFullLock(sheetId){
-  return Excel.run(async c=>{
-    const sh=c.workbook.worksheets.getItem(sheetId);
-    sh.load("id,name,protection/protected");
-    const span=sh.getRange(FULL_LOCK_AREA);
-    span.format.protection.load("locked");
-    await c.sync();
-    if(!sh.protection.protected||span.format.protection.locked!==true){
-      throw new Error('Full Lock sheet "'+sh.name+
-        '" BELUM berhasil: sheet terlindungi='+
-        sh.protection.protected+', semua sel A1:AH500 terkunci='+
-        span.format.protection.locked+'. Jangan menganggap sheet sudah aman.');
-    }
-    return {id:sh.id,name:sh.name};
-  });
+  const confirmed=await hbAssertFullLocks([sheetId]);
+  return confirmed[0];
 }
+
 // Reconcile older worksheets already locked before the masking feature existed.
 // Never clear or replace source values/formulas; only apply display formatting.
 async function maskExistingClosedSheets(){
