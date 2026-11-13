@@ -118,14 +118,18 @@ async function hbVerifyAndRepairHistoricalFullLocks(){
         String(sh.id)!==String(latest.id) ||
         (typeof hbIsExplicitlyClosedShift==="function"&&hbIsExplicitlyClosedShift(sh.id))
       ).filter(sh=>String(sh.id)!==exclude).map(sh=>{
-        const area=sh.getRange(FULL_LOCK_AREA);
-        area.format.protection.load("locked");
-        return {sh,area};
+        const cells=FULL_LOCK_PROBES.map(address=>{
+          const cell=sh.getRange(address);
+          cell.format.protection.load("locked");
+          return {address,cell};
+        });
+        return {sh,cells};
       });
       await ctx.sync();
-      return probes.map(({sh,area})=>({
+      return probes.map(({sh,cells})=>({
         id:sh.id,name:sh.name,
-        needsLock:!sh.protection.protected||area.format.protection.locked!==true
+        needsLock:!sh.protection.protected||
+          cells.some(({cell})=>cell.format.protection.locked!==true)
       }));
     });
     const broken=inspection.filter(x=>x.needsLock);
@@ -491,28 +495,21 @@ async function expireShiftWorkWindow() {
   const sheetName=getSetting(SHIFT_SHEET_NAME_KEY)||"sheet";
   try{
     const pw=requireSecret();
+    // The previous A1:AH500 .format.protection.load() can throw an
+    // Excel Online Invalid API call on complex worksheets. Do not perform
+    // a large range read here. Apply Full Lock, then verify 9 safe cells.
     const result=await Excel.run(async ctx=>{
       const wb=ctx.workbook,sh=wb.worksheets.getItem(sheetId);
       sh.load("name,protection/protected");
       wb.protection.load("protected");
-      const proof=sh.getRange(FULL_LOCK_AREA);
-      proof.format.protection.load("locked");
       await ctx.sync();
-      // Protected alone does not mean full lock. WorkingLock also protects.
-      if(!sh.protection.protected || proof.format.protection.locked!==true){
-        if(sh.protection.protected){
-          sh.protection.unprotect(pw);
-          await ctx.sync();
-        }
-        fullLock(sh,pw);
+      if(sh.protection.protected){
+        sh.protection.unprotect(pw);
+        await ctx.sync();
       }
+      fullLock(sh,pw);
       if(!wb.protection.protected)wb.protection.protect(pw);
       await ctx.sync();
-      sh.protection.load("protected");
-      proof.format.protection.load("locked");
-      await ctx.sync();
-      if(!sh.protection.protected || proof.format.protection.locked!==true)
-        throw new Error("Excel belum mengonfirmasi FULL LOCK A1:AH500; penguncian akan diulang.");
       return sh.name;
     });
     await hbAssertFullLock(sheetId);
@@ -727,8 +724,11 @@ async function relockPendingAdminSheet() {
       sheets.load("items/id,items/position");
       sh.load("id,name,protection/protected");
       wb.protection.load("protected");
-      const area=sh.getRange(FULL_LOCK_AREA);
-      area.format.protection.load("locked");
+      const checks=FULL_LOCK_PROBES.map(address=>{
+        const cell=sh.getRange(address);
+        cell.format.protection.load("locked");
+        return cell;
+      });
       await context.sync();
       const latest=sheets.items.reduce((a,b)=>
         Number(a.position)<Number(b.position)?a:b);
@@ -738,7 +738,7 @@ async function relockPendingAdminSheet() {
       // "protected" is NOT equivalent to Full Lock. A previous correction
       // exception or Working Lock may still leave inputs editable.
       const requiresReLock=!sh.protection.protected||
-        (!working&&area.format.protection.locked!==true);
+        (!working&&checks.some(cell=>cell.format.protection.locked!==true));
       if(requiresReLock){
         if(sh.protection.protected){sh.protection.unprotect(pw);await context.sync();}
         if(working)workingLock(sh,pw);
