@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.3.2";
+const HB_FORMULA_GUARD_BUILD="6.3.5";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_CORRECTION_ACCESS_KEY="hitunganV4.anomalyCorrectionAccessV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
@@ -197,6 +197,109 @@ function hbCorrectionAccessJournal(){
     ?JSON.parse(JSON.stringify(raw)):{};
 }
 
+// A correction is COPYABLE only when the committed snapshot contains
+// a literal reference formula for this exact cell. Never synthesize
+// formulas from an adjacent (possibly damaged/locked) worksheet.
+function hbCopyableExpectedFormula(issue){
+  if(!issue||HB_FORMULA_MINES.has(issue.address))return null;
+  return typeof issue.expected==="string"&&issue.expected.startsWith("=")
+    ?issue.expected:null;
+}
+async function hbCopyFormulaToClipboard(input,button,status){
+  const formula=String(input.value||"");
+  if(!formula.startsWith("="))return;
+  let copied=false;
+  try{
+    if(typeof navigator!=="undefined"&&navigator.clipboard&&
+       typeof navigator.clipboard.writeText==="function"){
+      await navigator.clipboard.writeText(formula);
+      copied=true;
+    }
+  }catch(_){}
+  if(!copied){
+    // Excel Online can deny navigator.clipboard in the add-in iframe.
+    // Always leave the entire exact formula selected for Ctrl+C.
+    input.focus();
+    input.select();
+    try{
+      if(typeof document!=="undefined"&&typeof document.execCommand==="function")
+        copied=document.execCommand("copy")===true;
+    }catch(_){}
+  }
+  if(status)status.textContent=copied
+    ?"Rumus lengkap tersalin. Tempel (Ctrl+V) di sel yang ditandai."
+    :"Rumus lengkap sudah dipilih. Tekan Ctrl+C lalu tempel di sel tujuan.";
+  if(button&&copied)button.textContent="Tersalin";
+}
+function hbRenderFormulaCorrectionList(result){
+  const container=typeof document!=="undefined"
+    ?document.getElementById("formulaCorrectionCopies"):null;
+  if(!container)return;
+  container.replaceChildren();
+  const issues=(result&&Array.isArray(result.issues))?result.issues:[];
+  const formulas=issues.filter(issue=>hbCopyableExpectedFormula(issue));
+  const blankCells=issues.filter(issue=>issue&&issue.expected===null);
+  if(!issues.length){
+    container.hidden=true;
+    return;
+  }
+  container.hidden=false;
+  const heading=document.createElement("div");
+  heading.className="formula-correction-heading";
+  heading.textContent="RUMUS BENAR — SALIN KE SEL YANG SALAH";
+  container.appendChild(heading);
+  const info=document.createElement("p");
+  info.className="formula-correction-intro";
+  info.textContent=formulas.length
+    ?("Ada "+formulas.length+" rumus perbaikan pada sheet terbaru. "+
+      "Tekan Salin Rumus, pilih sel tujuannya di Excel, lalu Ctrl+V. "+
+      "Rumus diambil dari acuan tetap, bukan sheet di atas.")
+    :"Tidak ada rumus yang perlu disalin. Periksa keterangan anomali stok/harga di bawah.";
+  container.appendChild(info);
+  for(const issue of formulas){
+    const formula=hbCopyableExpectedFormula(issue);
+    const item=document.createElement("div");
+    item.className="formula-correction-item";
+    const label=document.createElement("label");
+    label.className="formula-correction-label";
+    label.textContent="Sel "+issue.address+" — rumus yang benar:";
+    const input=document.createElement("textarea");
+    input.className="formula-correction-value";
+    input.readOnly=true;
+    input.rows=formula.length>100?4:2;
+    input.value=formula;
+    input.setAttribute("aria-label","Rumus benar untuk "+issue.address);
+    const copy=document.createElement("button");
+    copy.type="button";
+    copy.className="secondary-button formula-correction-copy";
+    copy.textContent="Salin Rumus "+issue.address;
+    const status=document.createElement("small");
+    status.className="formula-correction-copy-status";
+    copy.addEventListener("click",()=>hbCopyFormulaToClipboard(input,copy,status));
+    label.appendChild(input);
+    item.appendChild(label);
+    item.appendChild(copy);
+    item.appendChild(status);
+    container.appendChild(item);
+  }
+  for(const issue of blankCells){
+    if(HB_FORMULA_MINES.has(issue.address))continue;
+    const hint=document.createElement("p");
+    hint.className="formula-correction-intro";
+    hint.textContent="Sel "+issue.address+
+      " seharusnya KOSONG — hapus isi sel tersebut, jangan tempel rumus.";
+    container.appendChild(hint);
+  }
+  if(issues.some(issue=>HB_FORMULA_MINES.has(issue.address))){
+    const note=document.createElement("p");
+    note.className="formula-correction-intro";
+    note.textContent="Koreksi sel mines rahasia harus melalui Admin; rumusnya tidak ditampilkan kepada karyawan.";
+    container.appendChild(note);
+  }
+  // Entries are read-only documentation. This UI never modifies Excel cells,
+  // their protection, existing formulas, prices or stock.
+}
+
 function hbFormulaIssueDetail(issue){
   if(issue.kind==="NEGATIVE_MARGIN")return hbMarginIssueText(issue.marginIssue);
   if(issue.marginIssue){
@@ -215,12 +318,14 @@ function hbFormulaIssueDetail(issue){
   }
   if(issue.expected===null)
     return issue.address+" — SEHARUSNYA KOSONG, tetapi sekarang terisi";
+  if(HB_FORMULA_MINES.has(issue.address))
+    return issue.address+" — RUMUS RAHASIA SALAH; hanya Admin boleh memperbaiki.";
   const actual=issue.actual;
   if(typeof actual!=="string"||!actual.startsWith("="))
-    return issue.address+" — RUMUS HILANG / DIGANTI ANGKA ATAU TEKS"+
-      (issue.expected.length<=70?" (acuan "+issue.expected+")":"");
-  return issue.address+" — RUMUS BERUBAH DARI POLA / ACUAN"+
-    (issue.expected.length<=70?" (seharusnya "+issue.expected+")":"");
+    return issue.address+" — RUMUS HILANG / DIGANTI ANGKA ATAU TEKS. "+
+      "RUMUS BENAR: "+issue.expected;
+  return issue.address+" — RUMUS BERUBAH DARI POLA / ACUAN. "+
+    "RUMUS BENAR: "+issue.expected;
 }
 function hbFormulaGuardError(issues,sheetName){
   const details=issues.slice(0,45).map(hbFormulaIssueDetail);
@@ -294,11 +399,14 @@ function hbRenderFormulaSummary(result,formatFailure){
   const hasIssues=Boolean(result.issues&&result.issues.length);
   el.textContent=hbFormulaSummaryText(result,formatFailure);
   el.className="formula-audit-summary "+(hasIssues||formatFailure?"error":"ok");
+  hbRenderFormulaCorrectionList(result);
 }
 function hbRenderFormulaAuditUnavailable(reason){
   const el=typeof document!=="undefined"?document.getElementById("formulaAuditSummary"):null;
   if(!el)return;
   el.className="formula-audit-summary error";
+  const copies=document.getElementById("formulaCorrectionCopies");
+  if(copies){copies.hidden=true;copies.replaceChildren();}
   el.textContent="PEMERIKSAAN RUMUS BELUM BERHASIL\n"+
     "Belum ada hasil pemeriksaan yang dapat dipercaya.\n"+
     "Penyebab: "+(reason&&reason.message||String(reason))+
