@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.3.6";
+const HB_FORMULA_GUARD_BUILD="6.3.7";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_CORRECTION_ACCESS_KEY="hitunganV4.anomalyCorrectionAccessV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
@@ -944,6 +944,20 @@ async function hbVerifySourceFormulas(blockCreation=false){
 
 Office.onReady(info=>{
   if(info.host!==Office.HostType.Excel)return;
+  const recheck=document.getElementById("formulaRecheckBtn");
+  if(recheck)recheck.addEventListener("click",async()=>{
+    if(hbFormulaAuditBusy)return;
+    recheck.disabled=true;
+    try{
+      const result=await hbVerifySourceFormulas(false);
+      if(typeof setSecurityStatus==="function"&&!result.issues.length)
+        setSecurityStatus("PEMERIKSAAN ULANG LOLOS — semua penanda hitam-merah lama yang ditemukan telah dipulihkan.",false);
+    }catch(e){
+      hbRenderFormulaAuditUnavailable(e);
+      if(typeof setSecurityStatus==="function")
+        setSecurityStatus("Pemeriksaan ulang belum selesai: "+(e.message||String(e)),true);
+    }finally{recheck.disabled=false;}
+  });
   let attempts=0;
   const passiveAudit=()=>{
     if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)return;
