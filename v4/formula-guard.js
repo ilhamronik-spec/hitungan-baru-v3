@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.3.7";
+const HB_FORMULA_GUARD_BUILD="6.3.8";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_CORRECTION_ACCESS_KEY="hitunganV4.anomalyCorrectionAccessV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
