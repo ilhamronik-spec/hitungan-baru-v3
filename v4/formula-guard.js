@@ -672,6 +672,33 @@ async function hbPaintFormulaIssues(result){
       if(failed)throw failed;
     });
   }
+  if(paint.length||restore.length){
+    // Excel may acknowledge a format operation before another loaded add-in
+    // overrides it. Read each changed CELL again; never report a clean sheet
+    // while a restored black/red alert still remains on it.
+    const confirmation=await Excel.run(async ctx=>{
+      const sh=ctx.workbook.worksheets.getItem(result.sheetId);
+      const changes=[...new Set([...paint,...restore])].map(address=>{
+        const cell=sh.getRange(address);
+        cell.format.fill.load("color");
+        cell.format.font.load("color");
+        return {address,cell};
+      });
+      await ctx.sync();
+      return changes.map(({address,cell})=>({
+        address,marked:hbIsBlackRedMarker(
+          cell.format.fill.color,cell.format.font.color)
+      }));
+    });
+    const paints=new Set(paint),restores=new Set(restore);
+    const unexpected=confirmation.filter(x=>
+      (paints.has(x.address)&&!x.marked)||
+      (restores.has(x.address)&&x.marked));
+    if(unexpected.length)
+      throw new Error("Perubahan warna anomali belum tersimpan di: "+
+        unexpected.map(x=>x.address).join(", ")+
+        ". Tekan PERIKSA ULANG ANOMALI & WARNA.");
+  }
   for(const address of toRestore)delete next.cells[address];
   if(Object.keys(next.cells).length)previous[result.sheetId]=next;
   else delete previous[result.sheetId];
