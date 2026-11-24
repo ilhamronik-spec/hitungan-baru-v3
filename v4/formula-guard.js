@@ -917,8 +917,9 @@ async function hbVerifySourceFormulas(blockCreation=false){
     const result=await hbScanLatestSheetFormulas();
     // Event subscription is best-effort and must never block preflight.
     try{await hbWatchLatestFormulaCorrections(result.sheetId);}catch(_){}
-    let formatFailure=null;
-    try{await hbPaintFormulaIssues(result);}catch(e){formatFailure=e;}
+    let formatFailure=null,markerCleanupFailure=null;
+    try{await hbPaintFormulaIssues(result);}
+    catch(e){markerCleanupFailure=e;formatFailure=e;}
     // Cigarette NAME colors use static base fills (unlike dynamic Paket
     // formatting); they must be refreshed after a negative E margin is fixed.
     if(typeof hbMarginRefreshLatestRokokNames==="function"){
@@ -948,6 +949,14 @@ async function hbVerifySourceFormulas(blockCreation=false){
       hbShowFormulaNote(notice);
       if(blockCreation)throw new Error(notice);
     }else{
+      // A new shift inherits colors from the source. If legacy black/red
+      // cleanup failed, block cloning rather than copying obsolete alerts
+      // and confusing the next shift's employee.
+      if(markerCleanupFailure&&blockCreation)
+        throw new Error("PEMBUATAN SHEET DIBLOKIR: penanda hitam-merah lama "+
+          "belum berhasil diperiksa/dipulihkan pada sheet terbaru. "+
+          (markerCleanupFailure.message||String(markerCleanupFailure))+
+          ". Gunakan PERIKSA ULANG ANOMALI & WARNA.");
       if(!warning)hbClearStaleFormulaBlockMessage();
       if(accessFailure&&blockCreation)
         throw new Error("Pembuatan sheet DIBLOKIR: akses koreksi sebelumnya belum bisa dikunci kembali. "+
