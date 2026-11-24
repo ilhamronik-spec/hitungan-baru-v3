@@ -11,7 +11,7 @@
  * source sheet. A damaged source sheet cannot silently rewrite the standard.
  */
 
-const HB_FORMULA_GUARD_BUILD="6.3.5";
+const HB_FORMULA_GUARD_BUILD="6.3.6";
 const HB_FORMULA_GUARD_JOURNAL_KEY="hitunganV4.formulaGuardColorJournalV1";
 const HB_CORRECTION_ACCESS_KEY="hitunganV4.anomalyCorrectionAccessV1";
 const HB_FORMULA_GUARD_BLACK="#000000";
@@ -520,101 +520,166 @@ async function hbScanLatestSheetFormulas(){
 function hbFormulaColorReadSafe(v){
   return typeof v==="string"&&v.trim()!==""?v:null;
 }
+const HB_FORMULA_VISUAL_SWEPT=new Set();
+function hbIsBlackRedMarker(fill,font){
+  return String(fill||"").toUpperCase()===HB_FORMULA_GUARD_BLACK&&
+    String(font||"").toUpperCase()===HB_FORMULA_GUARD_RED;
+}
+function hbNormalMarkerColors(address,journal,current){
+  const candidates=[];
+  if(current&&current.cells&&current.cells[address])
+    candidates.push(current.cells[address]);
+  for(const source of Object.values(journal||[])){
+    if(source&&source.cells&&source.cells[address])
+      candidates.push(source.cells[address]);
+  }
+  const found=candidates.find(x=>x&&!hbIsBlackRedMarker(x.fill,x.font));
+  // Unknown inherited markers: remove hardcoded error fill/font so Excel's
+  // underlying cell/conditional styles can show. Never guess a neighboring
+  // sheet's formula or value to restore formatting.
+  return found?{fill:hbFormulaColorReadSafe(found.fill),
+    font:hbFormulaColorReadSafe(found.font)}:{fill:null,font:"#000000"};
+}
+async function hbFindUntrackedBlackRedMarkers(sheetId){
+  const addresses=[...HB_FORMULA_REFERENCE.keys()];
+  for(let row=6;row<=75;row++)addresses.push("C"+row);
+  for(let row=178;row<=238;row++)addresses.push("E"+row);
+  const unique=[...new Set(addresses)].filter(x=>!HB_FORMULA_MINES.has(x));
+  const matched=[];
+  // Excel Online can reject large range-format loads. Read individual cells
+  // in bounded batches ONCE per latest worksheet, not on each keystroke.
+  for(let i=0;i<unique.length;i+=100){
+    const group=unique.slice(i,i+100);
+    const found=await Excel.run(async ctx=>{
+      const sh=ctx.workbook.worksheets.getItem(sheetId);
+      const cells=group.map(address=>{
+        const r=sh.getRange(address);
+        r.format.fill.load("color");
+        r.format.font.load("color");
+        return {address,r};
+      });
+      await ctx.sync();
+      return cells.filter(({r})=>hbIsBlackRedMarker(
+        r.format.fill.color,r.format.font.color)).map(x=>x.address);
+    });
+    matched.push(...found);
+  }
+  return matched;
+}
 async function hbPaintFormulaIssues(result){
   const previous=hbFormulaGuardJournal();
   const oldSheet=previous[result.sheetId]||{name:result.sheetName,cells:{}};
   const recorded=oldSheet.cells||{};
-  const toIssue=new Set(result.issues.map(x=>x.address));
-  const toStart=result.issues.map(x=>x.address).filter(addr=>!recorded[addr]);
-  const toRestore=Object.keys(recorded).filter(addr=>!toIssue.has(addr));
   const adminOpen=typeof isGlobalUnlockMode==="function"&&isGlobalUnlockMode();
   const shouldPaint=address=>!HB_FORMULA_MINES.has(address)||adminOpen;
-  const starts=toStart.filter(shouldPaint);
-  const restores=toRestore.filter(shouldPaint);
-  const marked=Object.keys(recorded).filter(addr=>toIssue.has(addr)&&shouldPaint(addr));
-  if(!starts.length&&!restores.length&&!marked.length)return;
-  const colors=await Excel.run(async ctx=>{
+  const active=new Set(result.issues.map(x=>x.address));
+  const toStart=[...active].filter(address=>shouldPaint(address)&&!recorded[address]);
+  const toRestore=Object.keys(recorded).filter(address=>!active.has(address)&&shouldPaint(address));
+  let inherited=[];
+  if(!HB_FORMULA_VISUAL_SWEPT.has(result.sheetId)){
+    inherited=await hbFindUntrackedBlackRedMarkers(result.sheetId);
+  }
+  const stale=inherited.filter(address=>!active.has(address)&&
+    !toRestore.includes(address)&&shouldPaint(address));
+  const marked=Object.keys(recorded).filter(address=>active.has(address)&&shouldPaint(address));
+  const needRead=[...new Set([...toStart,...toRestore,...marked])];
+  if(!needRead.length&&!stale.length){
+    HB_FORMULA_VISUAL_SWEPT.add(result.sheetId);
+    return;
+  }
+  const inspected=needRead.length?await Excel.run(async ctx=>{
     const sh=ctx.workbook.worksheets.getItem(result.sheetId);
-    const inspect=[...new Set(starts.concat(marked))].map(address=>{
+    const cells=needRead.map(address=>{
       const range=sh.getRange(address);
       range.format.fill.load("color");
       range.format.font.load("color");
       return {address,range};
     });
     await ctx.sync();
-    return inspect.map(({address,range})=>({
+    return cells.map(({address,range})=>({
       address,fill:hbFormulaColorReadSafe(range.format.fill.color),
       font:hbFormulaColorReadSafe(range.format.font.color)
     }));
+  }):[];
+  const actual=new Map(inspected.map(x=>[x.address,x]));
+  const repaint=marked.filter(address=>{
+    const c=actual.get(address);
+    return c&&!hbIsBlackRedMarker(c.fill,c.font);
   });
-  const toRepaint=colors.filter(color=>
-    marked.includes(color.address) &&
-    (String(color.fill||"").toUpperCase()!==HB_FORMULA_GUARD_BLACK ||
-     String(color.font||"").toUpperCase()!==HB_FORMULA_GUARD_RED)
-  ).map(color=>color.address);
-  const toPaint=[...new Set(starts.concat(toRepaint))];
-  if(!toPaint.length&&!restores.length)return;
-  // Persist original colors BEFORE editing Excel so a refresh can restore them.
-  const entry={name:result.sheetName,cells:{...recorded}};
-  for(const color of colors){
-    if(starts.includes(color.address))
-      entry.cells[color.address]={fill:color.fill,font:color.font};
+  const paint=[...new Set(toStart.concat(repaint))];
+  // Do not alter a cell whose marker was already cleared by another module.
+  const restore=[...new Set([...toRestore.filter(address=>{
+    const c=actual.get(address);
+    return c&&hbIsBlackRedMarker(c.fill,c.font);
+  }),...stale])];
+  const next={name:result.sheetName,cells:{...recorded}};
+  for(const address of toStart){
+    const c=actual.get(address);
+    const base=c&&hbIsBlackRedMarker(c.fill,c.font)
+      ?hbNormalMarkerColors(address,previous,oldSheet)
+      :{fill:c?c.fill:null,font:c?c.font:"#000000"};
+    next.cells[address]=base;
   }
-  if(starts.length){
-    previous[result.sheetId]=entry;
+  if(toStart.length){
+    previous[result.sheetId]=next;
+    setSetting(HB_FORMULA_GUARD_JOURNAL_KEY,previous);
+    await saveSettings(); // Save original colors BEFORE painting.
+  }
+  if(paint.length||restore.length){
+    await Excel.run(async ctx=>{
+      const sh=ctx.workbook.worksheets.getItem(result.sheetId);
+      sh.load("id,protection/protected");
+      const marker=sh.getRange("A1");
+      marker.format.protection.load("locked");
+      await ctx.sync();
+      const wasProtected=Boolean(sh.protection.protected);
+      const wasFull=wasProtected&&marker.format.protection.locked===true;
+      const pw=wasProtected?requireSecret():null;
+      let unlocked=false,failed=null;
+      try{
+        if(wasProtected){
+          unlocked=true;
+          sh.protection.unprotect(pw);
+          await ctx.sync();
+        }
+        for(const address of paint){
+          const r=sh.getRange(address);
+          r.format.fill.color=HB_FORMULA_GUARD_BLACK;
+          r.format.font.color=HB_FORMULA_GUARD_RED;
+        }
+        for(const address of restore){
+          const r=sh.getRange(address);
+          const original=next.cells[address]||
+            hbNormalMarkerColors(address,previous,oldSheet);
+          if(original.fill)r.format.fill.color=original.fill;
+          else r.format.fill.clear();
+          r.format.font.color=original.font||"#000000";
+        }
+        await ctx.sync();
+      }catch(e){failed=e;}
+      finally{
+        if(unlocked){
+          try{
+            if(wasFull)fullLock(sh,pw);
+            else workingLock(sh,pw);
+            await ctx.sync();
+          }catch(e){
+            throw new Error("Proteksi gagal dipulihkan setelah pembaruan warna: "+
+              (e.message||String(e)));
+          }
+        }
+      }
+      if(failed)throw failed;
+    });
+  }
+  for(const address of toRestore)delete next.cells[address];
+  if(Object.keys(next.cells).length)previous[result.sheetId]=next;
+  else delete previous[result.sheetId];
+  if(toRestore.length){
     setSetting(HB_FORMULA_GUARD_JOURNAL_KEY,previous);
     await saveSettings();
   }
-  await Excel.run(async ctx=>{
-    const sh=ctx.workbook.worksheets.getItem(result.sheetId);
-    sh.load("id,protection/protected");
-    const marker=sh.getRange("A1");
-    marker.format.protection.load("locked");
-    await ctx.sync();
-    const protectedBefore=sh.protection.protected;
-    const wasFull=protectedBefore&&marker.format.protection.locked===true;
-    const pw=protectedBefore?requireSecret():null;
-    let unprotected=false,failed=null;
-    try{
-      if(protectedBefore){
-        // Mark before the Office batch is sent: a failed sync may still have
-        // unlocked Excel, and finally MUST attempt to restore protection.
-        unprotected=true;
-        sh.protection.unprotect(pw);
-        await ctx.sync();
-      }
-      for(const address of toPaint){
-        const cell=sh.getRange(address);
-        cell.format.fill.color=HB_FORMULA_GUARD_BLACK;
-        cell.format.font.color=HB_FORMULA_GUARD_RED;
-      }
-      for(const address of restores){
-        const cell=sh.getRange(address),original=recorded[address];
-        if(original.fill)cell.format.fill.color=original.fill;
-        else cell.format.fill.clear();
-        if(original.font)cell.format.font.color=original.font;
-        else cell.format.font.color="#000000";
-      }
-      await ctx.sync();
-    }catch(e){failed=e;}
-    finally{
-      if(unprotected){
-        try{
-          if(wasFull)fullLock(sh,pw);
-          else workingLock(sh,pw);
-          await ctx.sync();
-        }catch(relockError){
-          throw new Error("Tidak dapat memulihkan proteksi setelah penanda rumus: "+
-            (relockError.message||String(relockError)));
-        }
-      }
-    }
-    if(failed)throw failed;
-  });
-  for(const address of restores)delete entry.cells[address];
-  if(!Object.keys(entry.cells).length)delete previous[result.sheetId];
-  setSetting(HB_FORMULA_GUARD_JOURNAL_KEY,previous);
-  await saveSettings();
+  HB_FORMULA_VISUAL_SWEPT.add(result.sheetId);
 }
 
 // Grant a worksheet-level exception ONLY to cells needed for correcting
