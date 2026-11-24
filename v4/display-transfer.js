@@ -14,6 +14,8 @@ const displayTransferState = {
 };
 
 let displayTransferWrapped = false;
+let displayTransferSubmitSnapshot=null;
+const ROKOK_DISPLAY_INTENT_KEY="hitunganV4.rokokDisplayIntentV1";
 let displayWrapTimer = null;
 const ROKOK_DISPLAY_AUDIT_KEY="hitunganV4.rokokDisplayTransferAuditV1";
 const ROKOK_DISPLAY_AUDIT_MAX=5; // Keep Office document settings small; last five shifts suffice for recovery.
@@ -21,6 +23,7 @@ const ROKOK_DISPLAY_AUDIT_MAX=5; // Keep Office document settings small; last fi
 Office.onReady((info) => {
   if (info.host !== Office.HostType.Excel) return;
   bindDisplayTransferUi();
+  renderRokokTransferAudit();
   waitAndWrapCreateNewDay();
   // Recover ONLY an already-journaled, unfinished transfer for the LATEST
   // worksheet. Never create a new sheet or guess quantities from stock.
@@ -64,7 +67,13 @@ function bindDisplayTransferUi() {
   const form=document.getElementById("newDayForm");
   if(form)form.addEventListener("submit",event=>{
     captureDisplayTransferDraftFromDOM();
-    const pending=displayTransferState.items.some(x=>Number(x.qtyText)>0);
+    // CAPTURE PHASE runs before V2's submit handler. V2 may clear/re-render
+    // its form before it eventually invokes the async creation wrapper.
+    displayTransferSubmitSnapshot={
+      sourceSheetName:displayTransferState.sourceSheetName,
+      items:displayTransferState.items.map(x=>({...x}))
+    };
+    const pending=displayTransferSubmitSnapshot.items.some(x=>String(x.qtyText||"").trim()!=="");
     if(pending&&!displayTransferWrapped){
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -109,7 +118,9 @@ async function loadDisplayTransferItems(forceReload) {
         warehouseEnding: displayNumber(values[13]),
         qtyText: ""
       }))
-      .filter((item) => item.name && item.oldCost > 0);
+      // Named cigarette rows may have a blank/zero old price yet contain
+      // warehouse stock or a purchase entered in this shift. Never hide them.
+      .filter((item) => item.name);
   });
 
   renderDisplayTransferItems();
@@ -213,13 +224,16 @@ function captureDisplayTransferDraftFromDOM(){
 }
 
 function collectDisplayTransfers(sourceName, purchaseData) {
-  // Preserve pending transfers even when the panel is collapsed. Read the
-  // current DOM too, so the last typed quantity cannot be silently omitted.
-  captureDisplayTransferDraftFromDOM();
-  if (!displayTransferState.items.some(item=>String(item.qtyText||"").trim()!=="")) return [];
-
-  if (displayTransferState.sourceSheetName && displayTransferState.sourceSheetName !== sourceName) {
-    throw new Error(`Daftar tambah display berasal dari "${displayTransferState.sourceSheetName}", tetapi sheet aktif sekarang "${sourceName}". Tutup lalu buka kembali bagian Tambah Display.`);
+  // Use the immutable form-submission snapshot first. Without this, V2
+  // can replace/clear inputs before the asynchronous create wrapper runs.
+  if(!displayTransferSubmitSnapshot)captureDisplayTransferDraftFromDOM();
+  const snapshot=displayTransferSubmitSnapshot || displayTransferState;
+  const items=snapshot.items||[];
+  if (!items.some(item=>String(item.qtyText||"").trim()!=="")) return [];
+  if (!snapshot.sourceSheetName)
+    throw new Error("Sumber Tambah Display belum dimuat. Buka daftar rokok lalu ulangi.");
+  if (snapshot.sourceSheetName !== sourceName) {
+    throw new Error(`Daftar tambah display berasal dari "${snapshot.sourceSheetName}", tetapi sheet aktif sekarang "${sourceName}". Muat ulang daftar Tambah Display.`);
   }
 
   const purchaseByRow = new Map();
@@ -235,7 +249,7 @@ function collectDisplayTransfers(sourceName, purchaseData) {
   }
 
   const transfers = [];
-  for (const item of displayTransferState.items) {
+  for (const item of items) {
     const text = String(item.qtyText || "").trim();
     if (!text) continue;
     if (!/^\d+$/.test(text)) {
@@ -243,6 +257,8 @@ function collectDisplayTransfers(sourceName, purchaseData) {
     }
 
     const qty = Number(text);
+    if(!Number.isSafeInteger(qty))
+      throw new Error('Jumlah Tambah Display "'+item.name+'" melebihi batas angka aman.');
     if (qty <= 0) continue;
 
     const available = displayNumber(item.warehouseEnding) + displayNumber(purchaseByRow.get(item.row));
@@ -255,6 +271,34 @@ function collectDisplayTransfers(sourceName, purchaseData) {
   return transfers;
 }
 
+function readRokokTransferIntent(){
+  const raw=typeof getSetting==="function"?getSetting(ROKOK_DISPLAY_INTENT_KEY):null;
+  return raw&&typeof raw==="object"&&!Array.isArray(raw)?raw:null;
+}
+async function saveRokokTransferIntent(target,source,rows){
+  if(!rows.length)return;
+  const previous=readRokokTransferIntent();
+  if(previous&&previous.target===target&&previous.source===source&&
+     JSON.stringify(previous.rows)===JSON.stringify(rows))return;
+  setSetting(ROKOK_DISPLAY_INTENT_KEY,{
+    target,source,rows:rows.map(r=>({row:r.row,name:r.name,qty:r.qty})),
+    status:"awaiting-sheet",createdAt:Date.now()
+  });
+  await saveSettings();
+}
+async function clearRokokTransferIntent(target){
+  const previous=readRokokTransferIntent();
+  if(previous&&previous.target===target){
+    // Do not persist an unverified transfer as a success. The independent
+    // audit already needs to be marked VERIFIED first.
+    const audit=getRokokTransferAudit(target);
+    if(!audit||audit.status!=="verified")return;
+    if(typeof Office!=="undefined"&&Office.context&&Office.context.document)
+      Office.context.document.settings.remove(ROKOK_DISPLAY_INTENT_KEY);
+    else setSetting(ROKOK_DISPLAY_INTENT_KEY,null);
+    await saveSettings();
+  }
+}
 function waitAndWrapCreateNewDay() {
   if (displayWrapTimer) clearInterval(displayWrapTimer);
 
@@ -283,6 +327,10 @@ function waitAndWrapCreateNewDay() {
         });
 
         const transfers = collectDisplayTransfers(sourceName, purchaseData);
+        // Persist the exact intended quantities BEFORE V2 can create the
+        // worksheet. If Excel reloads, we retain proof of what was entered.
+        // An orphan intent is NOT applied automatically (could double-add).
+        if(transfers.length)await saveRokokTransferIntent(sheetName,sourceName,transfers);
         const result = await securedCreateNewDay(person, sheetName, purchaseData);
 
         if (transfers.length) {
@@ -294,7 +342,13 @@ function waitAndWrapCreateNewDay() {
           }
         }
 
+        if(transfers.length){
+          await clearRokokTransferIntent(sheetName);
+          showDisplayTransferMessage(transfers.length+" jenis Rokok berhasil ditambah ke F sheet "+
+            sheetName+" dan dibaca ulang.",false);
+        }
         resetDisplayTransferDrafts();
+        renderRokokTransferAudit();
         return result;
       };
 
@@ -357,10 +411,16 @@ function renderRokokTransferAudit(){
   const el=document.getElementById("rokokTransferAuditStatus");
   if(!el)return;
   const rows=readRokokTransferAudit().slice(-5).reverse();
-  el.textContent=rows.length?rows.map(x=>
+  const unresolved=readRokokTransferIntent();
+  const note=unresolved
+    ?("BELUM TERVERIFIKASI: "+unresolved.target+" ("+
+       unresolved.rows.reduce((s,r)=>s+Number(r.qty||0),0)+
+       " pcs). JANGAN buat sheet duplikat; periksa F atau hubungi Admin. ")
+    :"";
+  el.textContent=note+(rows.length?rows.map(x=>
     x.target+": "+(x.status==="verified"?"TERVERIFIKASI":"PERLU DIPERIKSA")+
     " ("+x.rows.length+" barang, "+x.rows.reduce((s,r)=>s+Number(r.qty||0),0)+" pcs)"
-  ).join(" | "):"Belum ada catatan transfer Rokok versi terbaru.";
+  ).join(" | "):"Belum ada transfer Rokok terverifikasi.");
 }
 // A target-specific journal is written BEFORE any F-cell changes. If Excel
 // rejects a later operation, retry checks baseline vs expected to prevent
@@ -486,6 +546,7 @@ async function applyDisplayTransfersToNewSheet(sheetName,transfers,sourceName){
 }
 
 function resetDisplayTransferDrafts() {
+  displayTransferSubmitSnapshot=null;
   displayTransferState.open = false;
   displayTransferState.sourceSheetName = "";
   displayTransferState.items = [];
@@ -502,7 +563,8 @@ function resetDisplayTransferDrafts() {
   if (search) search.value = "";
   if (list) list.replaceChildren();
   if (summary) summary.textContent = "";
-  if (message) message.textContent = "";
+  // Do NOT erase the success message: the panel is collapsed after create,
+  // so a separate always-visible audit status remains for employees.
 }
 
 function showDisplayTransferMessage(text, isError) {
