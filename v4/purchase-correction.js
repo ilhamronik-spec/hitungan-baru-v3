@@ -272,6 +272,32 @@ async function hbPcPlan(changes,expectedTarget){
       }
     }
   }
+  // Balance and warehouse formulas MUST exist BEFORE changing any stock.
+  // This prevents a "successful" quantity edit that cannot update totals.
+  if(cells.length){
+    const affected=[...new Set(cells.map(x=>x.sheetId))];
+    await Excel.run(async ctx=>{
+      const refs=[];
+      for(const id of affected){
+        const sh=ctx.workbook.worksheets.getItem(id);
+        for(const address of ["G275","D275"]){
+          const r=sh.getRange(address);r.load("formulas");
+          refs.push({id,address,r});
+        }
+        for(const a of adjustments){
+          const address="N"+a.row;
+          const r=sh.getRange(address);r.load("formulas");
+          refs.push({id,address,r});
+        }
+      }
+      await ctx.sync();
+      for(const {id,address,r} of refs){
+        if(!String(r.formulas[0][0]||"").startsWith("="))
+          throw new Error("Rumus "+address+" pada sheet terkait hilang. "+
+            "Koreksi BELUM DILAKUKAN agar balance/stok tidak salah; perlu Admin.");
+      }
+    });
+  }
   if(cells.length>400)
     throw new Error("Koreksi menyentuh lebih dari 400 sel stok lintas shift. "+
       "Dibatalkan agar jurnal tidak terlalu besar; perlu rekonsiliasi Admin.");
