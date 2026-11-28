@@ -27,6 +27,12 @@ function hbPcStatus(message,error=false){
   el.style.color=error?"#b42318":"#334155";
   el.style.whiteSpace="pre-wrap";
 }
+async function hbPcRefreshWorkbookSettings(){
+  // Read the shared workbook settings before trusting a correction journal
+  // that another employee/device may have changed.
+  if(typeof refreshShiftSettingsFromWorkbook==="function")
+    await refreshShiftSettingsFromWorkbook();
+}
 function hbPcJournal(){
   const raw=typeof getSetting==="function"?getSetting(HB_PC_JOURNAL_KEY):null;
   return Array.isArray(raw)?raw.filter(x=>x&&typeof x==="object"):[];
@@ -470,6 +476,7 @@ async function hbPcLoad(){
   try{
     if(typeof getSetting!=="function"||getSetting("hitunganV4.enabled")!==true)
       throw new Error("Pengaman workbook belum aktif.");
+    await hbPcRefreshWorkbookSettings();
     const pending=await hbPcRecoverPending();
     if(hbPcJournal().some(x=>x.status==="pending")){
       hbPcState.loaded=null;hbPcRender();
@@ -481,8 +488,8 @@ async function hbPcLoad(){
       hbPcStatus("Tidak ditemukan riwayat belanja terverifikasi dari stok pada workbook ini. Tidak ada sheet yang dibuka.",true);
       hbPcRender();return;
     }
-    hbPcStatus("SHEET BELANJA TERAKHIR: "+data.targetName+
-      " | sumber pembanding: "+data.previousName+
+    hbPcStatus("SHEET TERAKHIR DENGAN INDIKASI BELANJA: "+data.targetName+
+      " | pembanding: "+data.previousName+
       ". Koreksi jumlah Paket menyesuaikan D (stok awal), Rokok menyesuaikan O (belanja). "+
       "Harga dan rumus tetap. Balance dihitung ulang otomatis.",false);
     hbPcRender();
@@ -501,6 +508,9 @@ async function hbPcSubmit(){
   if(button)button.disabled=true;
   let ownedBusy=false;
   try{
+    await hbPcRefreshWorkbookSettings();
+    if(hbPcJournal().some(x=>x.status==="pending"))
+      throw new Error("Masih ada koreksi belanja tertunda dari perangkat lain. Muat ulang statusnya.");
     const plan=await hbPcPlan(changes,hbPcState.loaded.targetId);
     if(!plan.cells.length)throw new Error("Tidak ditemukan perubahan stok yang dapat diterapkan.");
     if(typeof hbShiftPipelineBusy!=="undefined"){
