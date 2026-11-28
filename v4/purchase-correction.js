@@ -318,6 +318,9 @@ async function hbPcApplyCells(plan){
     });
     await ctx.sync();
     for(const entry of sheets){
+      if(!entry.sh.protection.protected)
+        throw new Error("Sheet "+entry.sh.name+" sedang tidak terproteksi. "+
+          "Minta Admin sinkronkan proteksi sebelum koreksi.");
       for(const p of entry.changes){
         const actual=hbPcNum(p.cell.values[0][0]);
         if(actual!==p.before&&actual!==p.after)
@@ -382,6 +385,7 @@ async function hbPcVerifyPlan(plan){
       const sh=ctx.workbook.worksheets.getItem(id);
       const balance=sh.getRange("G275"),cash=sh.getRange("D275");
       balance.load("formulas");cash.load("formulas");
+      balance.load("values");cash.load("values");
       formulas.push({sh,balance,cash});
     }
     await ctx.sync();
@@ -389,11 +393,18 @@ async function hbPcVerifyPlan(plan){
     if(failed.length)throw new Error("Koreksi belum terverifikasi: "+
       failed.slice(0,7).map(x=>x.p.address).join(", ")+
       ". Jangan mengulang input; periksa status koreksi.");
-    for(const {sh,balance,cash} of formulas)
+    for(const {sh,balance,cash} of formulas){
       if(!String(balance.formulas[0][0]||"").startsWith("=")||
          !String(cash.formulas[0][0]||"").startsWith("="))
         throw new Error("Rumus balance/modal hilang pada sheet "+sh.name+
           ". Perubahan stok tersimpan tetapi balance perlu Admin.");
+      if(typeof balance.values[0][0]!=="number"||
+         !Number.isFinite(balance.values[0][0])||
+         typeof cash.values[0][0]!=="number"||
+         !Number.isFinite(cash.values[0][0]))
+        throw new Error("Perhitungan balance/modal pada sheet "+sh.name+
+          " tidak menghasilkan angka. Stok sudah diperbarui, tetapi perlu Admin.");
+    }
     return {changed:reads.length,sheets:ids.length};
   });
 }
@@ -481,8 +492,10 @@ async function hbPcSubmit(){
     hbPcDom("purchaseCorrectionConfirm").checked=false;
     // Refresh the visible quantities without calling hbPcLoad() while
     // hbPcState.working is still true (that function intentionally defers).
-    hbPcState.loaded=await hbPcInspectLastPurchased();
-    hbPcRender();
+    try{
+      hbPcState.loaded=await hbPcInspectLastPurchased();
+      hbPcRender();
+    }catch(_){hbPcState.loaded=null;}
     hbPcStatus("BERHASIL TERVERIFIKASI: "+plan.rows.length+" jenis belanja pada "+
       plan.targetName+". "+plan.cells.length+" sel stok diperbarui dalam "+
       [...new Set(plan.cells.map(x=>x.sheetId))].length+
