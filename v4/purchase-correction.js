@@ -33,8 +33,19 @@ function hbPcJournal(){
 }
 async function hbPcSaveJournal(entry){
   const all=hbPcJournal().filter(x=>x.id!==entry.id);
-  all.push(entry);
-  setSetting(HB_PC_JOURNAL_KEY,all.slice(-12));
+  // The Office document-settings store is small. Pending writes need the
+  // full cell journal for idempotent recovery; verified entries keep a
+  // compact audit summary, not a huge historical copy of every cell.
+  const record=entry.status==="pending"?entry:{
+    id:entry.id,status:entry.status,targetId:entry.targetId,
+    targetName:entry.targetName,createdAt:entry.createdAt,
+    verifiedAt:entry.verifiedAt||0,rows:entry.rows||[],
+    cellCount:entry.cells?.length||entry.cellCount||0,
+    sheetCount:entry.cells
+      ?new Set(entry.cells.map(x=>x.sheetId)).size:(entry.sheetCount||0)
+  };
+  all.push(record);
+  setSetting(HB_PC_JOURNAL_KEY,all.slice(-8));
   await saveSettings();
 }
 function hbPcPrevious(sheetItems,target){
@@ -261,6 +272,9 @@ async function hbPcPlan(changes,expectedTarget){
       }
     }
   }
+  if(cells.length>400)
+    throw new Error("Koreksi menyentuh lebih dari 400 sel stok lintas shift. "+
+      "Dibatalkan agar jurnal tidak terlalu besar; perlu rekonsiliasi Admin.");
   return {targetId:hbPcId(target.targetId),targetName:target.targetName,
     previousId:hbPcId(target.previousId),newerSheetIds:target.newerSheetIds.map(hbPcId),
     rows:changes,cells,createdAt:Date.now()};
@@ -392,6 +406,23 @@ async function hbPcRecoverPending(){
     await hbPcSaveJournal(pending);
     return "Koreksi sebelumnya terverifikasi setelah pemeriksaan ulang.";
   }catch(e){
+    // If absolutely no cells were written, discard the old intent safely.
+    // A partially applied plan remains blocked for explicit Admin review.
+    try{
+      const status=await Excel.run(async ctx=>{
+        const cells=pending.cells.map(x=>{
+          const r=ctx.workbook.worksheets.getItem(x.sheetId).getRange(x.address);
+          r.load("values");return {r,x};
+        });
+        await ctx.sync();
+        return cells.every(({r,x})=>hbPcNum(r.values[0][0])===x.before);
+      });
+      if(status){
+        pending.status="cancelled";pending.verifiedAt=Date.now();
+        await hbPcSaveJournal(pending);
+        return "Koreksi tertunda dibatalkan dengan aman: tidak ada nilai stok yang berubah.";
+      }
+    }catch(_){}
     return "Ada koreksi BELUM TERVERIFIKASI ("+pending.targetName+"): "+
       (e.message||String(e))+". Koreksi baru diblokir sampai Admin memeriksa.";
   }
