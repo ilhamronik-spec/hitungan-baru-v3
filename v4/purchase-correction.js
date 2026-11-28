@@ -262,7 +262,8 @@ async function hbPcPlan(changes,expectedTarget){
     }
   }
   return {targetId:hbPcId(target.targetId),targetName:target.targetName,
-    previousId:hbPcId(target.previousId),rows:changes,cells,createdAt:Date.now()};
+    previousId:hbPcId(target.previousId),newerSheetIds:target.newerSheetIds.map(hbPcId),
+    rows:changes,cells,createdAt:Date.now()};
 }
 function hbPcBusy(){
   return hbPcState.working||
@@ -277,6 +278,18 @@ async function hbPcApplyCells(plan){
   const pw=requireSecret();
   // One synchronized Excel batch. First validate ALL values, then write.
   await Excel.run(async ctx=>{
+    // Guard against a newly created shift (on this or another device) since
+    // preview. Never silently mutate a no-longer-latest purchase record.
+    const collection=ctx.workbook.worksheets;
+    collection.load("items/id,items/position");
+    await ctx.sync();
+    const sorted=[...collection.items].sort((a,b)=>Number(a.position)-Number(b.position));
+    const selectedIndex=sorted.findIndex(x=>hbPcId(x.id)===plan.targetId);
+    if(selectedIndex<0||!sorted[selectedIndex+1]||
+       hbPcId(sorted[selectedIndex+1].id)!==plan.previousId||
+       JSON.stringify(sorted.slice(0,selectedIndex).map(x=>hbPcId(x.id)))!==
+       JSON.stringify(plan.newerSheetIds))
+      throw new Error("Susunan shift berubah saat koreksi; tidak ada stok yang diubah.");
     const sheetIds=[...new Set(plan.cells.map(x=>x.sheetId))];
     const sheets=sheetIds.map(id=>{
       const sh=ctx.workbook.worksheets.getItem(id);
@@ -435,12 +448,14 @@ async function hbPcSubmit(){
     plan.status="verified";plan.verifiedAt=Date.now();
     await hbPcSaveJournal(plan);
     hbPcDom("purchaseCorrectionConfirm").checked=false;
+    // Refresh the visible quantities without calling hbPcLoad() while
+    // hbPcState.working is still true (that function intentionally defers).
+    hbPcState.loaded=await hbPcInspectLastPurchased();
+    hbPcRender();
     hbPcStatus("BERHASIL TERVERIFIKASI: "+plan.rows.length+" jenis belanja pada "+
       plan.targetName+". "+plan.cells.length+" sel stok diperbarui dalam "+
       [...new Set(plan.cells.map(x=>x.sheetId))].length+
       " sheet. Rumus modal dan balance tetap dan otomatis dihitung ulang.",false);
-    hbPcState.loaded=null;
-    await hbPcLoad();
   }catch(e){
     hbPcStatus("KOREKSI BELUM TERKONFIRMASI: "+(e.message||String(e))+
       ". Jangan mengulangi sebelum status riwayat diperiksa.",true);
