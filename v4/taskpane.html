@@ -16,13 +16,14 @@
     <script src="./mines-mask-recovery.js?v=6.3.3" defer></script>
     <script src="./deferred-pricing.js?v=5.8.0" defer></script>
     <script src="./margin-colors.js?v=6.3.3" defer></script>
+    <script src="./purchase-correction.js?v=6.3.9" defer></script>
   </head>
   <body>
     <main class="pane">
       <header class="header">
         <div class="mark" aria-hidden="true">HB</div>
         <div>
-          <h1>Hitungan Baru Aman V4 · 6.3.8</h1>
+          <h1>Hitungan Baru Aman V4 · 6.3.9</h1>
           <p id="sourceSheet" class="source">Membaca sheet aktif...</p>
         </div>
       </header>
@@ -243,6 +244,33 @@
         </button>
       </form>
 
+        <section id="purchaseCorrectionSection" class="shopping-section" aria-label="Koreksi Belanja">
+          <div class="shopping-heading">
+            <div>
+              <h2>Koreksi Belanja</h2>
+              <p class="security-note">Hanya sheet terakhir yang memiliki riwayat belanja. Tidak membuat sheet baru.</p>
+            </div>
+            <button id="purchaseCorrectionToggle" type="button" class="secondary-button">Buka Koreksi</button>
+          </div>
+          <div id="purchaseCorrectionBody" hidden>
+            <p id="purchaseCorrectionStatus" class="security-note" role="status" aria-live="polite">Belum diperiksa.</p>
+            <p class="security-note">Koreksi jumlah pcs saja. Paket menyesuaikan stok awal D berdasarkan stok akhir shift sebelumnya; Rokok memperbarui pembelian O. Harga, rumus, dan input lain tidak disentuh. Stok gudang Rokok pada shift lanjutan hanya disesuaikan bila rantai stoknya cocok.</p>
+            <button id="purchaseCorrectionReload" type="button" class="secondary-button">Muat Ulang Riwayat Belanja</button>
+            <label for="purchaseCorrectionSearch">Cari Paket atau Rokok</label>
+            <input id="purchaseCorrectionSearch" type="search" autocomplete="off" placeholder="Ketik nama barang" />
+            <label class="purchase-correction-check">
+              <input id="purchaseCorrectionShowAll" type="checkbox" />
+              Tampilkan semua barang (termasuk yang belum tercatat belanjanya)
+            </label>
+            <div id="purchaseCorrectionRows" class="purchase-correction-list"></div>
+            <p id="purchaseCorrectionPreview" class="security-note" role="status"></p>
+            <label class="purchase-correction-check">
+              <input id="purchaseCorrectionConfirm" type="checkbox" />
+              Saya sudah memeriksa jumlah belanja yang benar. Koreksi dapat mengubah hitungan stok, modal, dan balance.
+            </label>
+            <button id="purchaseCorrectionApply" type="button">SIMPAN &amp; VERIFIKASI KOREKSI BELANJA</button>
+          </div>
+        </section>
         <div id="status" class="status" role="status" aria-live="polite"></div>
       </section>
     </main>
