@@ -464,3 +464,24 @@ button:disabled {
 .margin-legend i {display:inline-block; width:16px; height:16px; border-radius:4px; border:1px solid rgba(0,0,0,.12); flex:0 0 16px;}
 #marginColorsPanel {display:grid; gap:8px;}
 #marginColorStatus {overflow-wrap:anywhere;}
+
+
+/* Standalone Koreksi Belanja: does not change styles of the existing forms. */
+#purchaseCorrectionSection .shopping-heading > div { min-width:0; flex:1; }
+#purchaseCorrectionToggle { margin:0; padding:7px 10px; flex-shrink:0; }
+#purchaseCorrectionBody[hidden] { display:none; }
+.purchase-correction-list { margin:10px 0; max-height:340px; overflow-y:auto; }
+.purchase-correction-row {
+  margin:8px 0; padding:10px; background:#fff; border:1px solid #d1d5db; border-radius:7px;
+}
+.purchase-correction-title { color:#0f172a; font-size:13px; font-weight:700; overflow-wrap:anywhere; }
+.purchase-correction-row small { display:block; color:#5b6472; font-size:11px; margin:5px 0 8px; }
+.purchase-correction-row label { display:block; font-size:12px; color:#334155; }
+.purchase-correction-row input { width:100%; margin-top:4px; }
+.purchase-correction-check {
+  display:flex; align-items:flex-start; gap:8px; margin:10px 0;
+  font-size:12px; line-height:1.5; color:#334155; cursor:pointer;
+}
+.purchase-correction-check input { width:auto; flex-shrink:0; margin-top:2px; }
+#purchaseCorrectionPreview { white-space:pre-wrap; overflow-wrap:anywhere; }
+#purchaseCorrectionApply { width:100%; }
