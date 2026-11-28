@@ -66,7 +66,9 @@ function hbPcItemsFromRanges(targetId,targetName,previousId,previousName,packet,
     const stock=hbPcInt(a[3]),ending=hbPcInt(a[4]),previous=hbPcInt(v);
     if(!Number.isFinite(stock)||!Number.isFinite(ending)||!Number.isFinite(previous))continue;
     const qty=stock-previous;
-    if(!Number.isSafeInteger(qty))continue;
+    // Negative carry differences are not proof of a purchase. Do not
+    // expose them as editable "quantity purchased" inputs.
+    if(!Number.isSafeInteger(qty)||qty<0)continue;
     items.push({group:"paket",row,name,address:"D"+row,previous,opening:stock,ending,
       originalQty:qty,cost:Number(a[1])||0,qtyText:String(Math.max(0,qty))});
   }
@@ -181,8 +183,6 @@ function hbPcChanges(){
     if(!/^\d+$/.test(raw))throw new Error("Jumlah "+item.name+" harus angka bulat mulai 0.");
     const next=Number(raw);
     if(!Number.isSafeInteger(next))throw new Error("Jumlah "+item.name+" terlalu besar.");
-    if(item.originalQty<0&&item.qtyText!==String(item.originalQty))
-      throw new Error("Stok "+item.name+" sudah memiliki selisih negatif; minta Admin memeriksa.");
     if(next!==item.originalQty)changes.push({group:item.group,row:item.row,name:item.name,
       oldQty:item.originalQty,newQty:next,delta:next-item.originalQty});
   }
