@@ -12,7 +12,7 @@
  * if the existing warehouse carry-forward chain is EXACT, may be written.
  * All workbook balance formulas stay intact and recalculate themselves.
  */
-const HB_PC_BUILD="6.3.9";
+const HB_PC_BUILD="6.3.10";
 const HB_PC_JOURNAL_KEY="hitunganV4.purchaseCorrectionHistoryV1";
 const HB_PC_MAX_SHEETS=180;
 const hbPcState={loaded:null,working:false,showAll:false,filter:""};
